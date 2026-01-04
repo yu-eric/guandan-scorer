@@ -48,6 +48,198 @@
 	let exportError = $state('');
 	let showResetConfirm = $state(false);
 
+	const STORAGE_KEY = 'guandan-scorer-state-v1';
+
+	type PersistedState = {
+		currentScreen: Screen;
+		gameMode: GameMode;
+		team1Level: number;
+		team2Level: number;
+		team1Name: string;
+		team2Name: string;
+		team1Players: string[];
+		team2Players: string[];
+		roundHistory: RoundHistory[];
+		roundNumber: number;
+		isInitialSetup: boolean;
+		gameWinner: string;
+		gameDuration: number;
+		darkMode: boolean;
+		language: 'en' | 'zh';
+		trumpTeam: TrumpTeam;
+		aceChallengeTeam: TeamId | null;
+		aceChallengeRemaining: number;
+		roundPlacesTeam1: string[];
+		roundPlacesTeam2: string[];
+	};
+
+	const defaultPlayers: Record<GameMode, Record<TeamId, string[]>> = {
+		'2v2': {
+			1: ['Player 1', 'Player 2'],
+			2: ['Player 3', 'Player 4']
+		},
+		'3v3': {
+			1: ['Player 1', 'Player 2', 'Player 3'],
+			2: ['Player 4', 'Player 5', 'Player 6']
+		}
+	};
+
+	function getDefaultPlayers(mode: GameMode, team: TeamId): string[] {
+		return [...defaultPlayers[mode][team]];
+	}
+
+	function normalizePlayers(players: unknown, mode: GameMode, team: TeamId): string[] {
+		const fallback = getDefaultPlayers(mode, team);
+		if (!Array.isArray(players)) return fallback;
+		const cleaned = fallback.map((name, idx) => {
+			const value = players[idx];
+			return typeof value === 'string' && value.trim() ? value : name;
+		});
+		return cleaned.slice(0, fallback.length);
+	}
+
+	function normalizeRoundPlaces(places: unknown, expectedLength: number): string[] {
+		if (!Array.isArray(places)) return Array(expectedLength).fill('');
+		return Array.from({ length: expectedLength }, (_, idx) => {
+			const value = places[idx];
+			return typeof value === 'string' ? value : '';
+		});
+	}
+
+	function normalizeNumberArray(value: unknown): number[] {
+		if (!Array.isArray(value)) return [];
+		return value
+			.map((v) => Number(v))
+			.filter((v) => Number.isFinite(v));
+	}
+
+	function normalizeHistory(history: unknown): RoundHistory[] {
+		if (!Array.isArray(history)) return [];
+		return history
+			.map((item) => {
+				if (!item || typeof item !== 'object') return null;
+				const data = item as Record<string, unknown>;
+				const round = Number(data.round);
+				const points = Number(data.points);
+				const team1LevelValue = Number(data.team1Level);
+				const team2LevelValue = Number(data.team2Level);
+				const team1PlacesValue = normalizeNumberArray(data.team1Places);
+				const team2PlacesValue = normalizeNumberArray(data.team2Places);
+				const trumpTeamValue = data.trumpTeam === 1 || data.trumpTeam === 2 ? (data.trumpTeam as TeamId) : null;
+				const aceTeamValue = data.aceChallengeTeam === 1 || data.aceChallengeTeam === 2 ? (data.aceChallengeTeam as TeamId) : null;
+				const aceRemainingValue = Number(data.aceChallengeRemaining);
+				if (!Number.isFinite(round) || !Number.isFinite(points)) return null;
+				if (!Number.isFinite(team1LevelValue) || !Number.isFinite(team2LevelValue)) return null;
+				return {
+					round,
+					winner: typeof data.winner === 'string' ? data.winner : '',
+					combo: typeof data.combo === 'string' ? data.combo : '',
+					points,
+					team1Level: team1LevelValue,
+					team2Level: team2LevelValue,
+					trumpTeam: trumpTeamValue,
+					aceChallengeTeam: aceTeamValue,
+					aceChallengeRemaining: Number.isFinite(aceRemainingValue) ? aceRemainingValue : 0,
+					team1Places: team1PlacesValue,
+					team2Places: team2PlacesValue
+				};
+			})
+			.filter((v): v is RoundHistory => v !== null);
+	}
+
+	function buildPersistedState(): PersistedState {
+		return {
+			currentScreen,
+			gameMode,
+			team1Level,
+			team2Level,
+			team1Name,
+			team2Name,
+			team1Players: [...team1Players],
+			team2Players: [...team2Players],
+			roundHistory: roundHistory.map((round) => ({
+				...round,
+				team1Places: [...round.team1Places],
+				team2Places: [...round.team2Places]
+			})),
+			roundNumber,
+			isInitialSetup,
+			gameWinner,
+			gameDuration,
+			darkMode,
+			language,
+			trumpTeam,
+			aceChallengeTeam,
+			aceChallengeRemaining,
+			roundPlacesTeam1: [...roundPlacesTeam1],
+			roundPlacesTeam2: [...roundPlacesTeam2]
+		};
+	}
+
+	function clearPersistedState() {
+		if (typeof localStorage === 'undefined') return;
+		localStorage.removeItem(STORAGE_KEY);
+	}
+
+	function loadPersistedState(): PersistedState | null {
+		if (typeof localStorage === 'undefined') return null;
+		const raw = localStorage.getItem(STORAGE_KEY);
+		if (!raw) return null;
+		try {
+			return JSON.parse(raw) as PersistedState;
+		} catch (e) {
+			console.error('Failed to parse cached game state', e);
+			return null;
+		}
+	}
+
+	function applyPersistedState(state: PersistedState) {
+		const storedMode = state?.gameMode === '3v3' ? '3v3' : '2v2';
+		gameMode = storedMode;
+		team1Name = typeof state?.team1Name === 'string' && state.team1Name ? state.team1Name : 'Team 1';
+		team2Name = typeof state?.team2Name === 'string' && state.team2Name ? state.team2Name : 'Team 2';
+		team1Players = normalizePlayers(state?.team1Players, storedMode, 1);
+		team2Players = normalizePlayers(state?.team2Players, storedMode, 2);
+		team1Level = Number.isFinite(state?.team1Level) ? state.team1Level : 2;
+		team2Level = Number.isFinite(state?.team2Level) ? state.team2Level : 2;
+		roundHistory = normalizeHistory(state?.roundHistory);
+		roundNumber = Number.isFinite(state?.roundNumber) && state.roundNumber > 0 ? state.roundNumber : 1;
+		isInitialSetup = Boolean(state?.isInitialSetup);
+		gameWinner = typeof state?.gameWinner === 'string' ? state.gameWinner : '';
+		gameDuration = Number.isFinite(state?.gameDuration) ? state.gameDuration : 0;
+		darkMode = Boolean(state?.darkMode);
+		language = state?.language === 'zh' ? 'zh' : 'en';
+		trumpTeam = state?.trumpTeam === 1 || state?.trumpTeam === 2 ? state.trumpTeam : null;
+		aceChallengeTeam = state?.aceChallengeTeam === 1 || state?.aceChallengeTeam === 2 ? state.aceChallengeTeam : null;
+		aceChallengeRemaining = Number.isFinite(state?.aceChallengeRemaining) ? state.aceChallengeRemaining : 0;
+		roundPlacesTeam1 = normalizeRoundPlaces(state?.roundPlacesTeam1, team1Players.length);
+		roundPlacesTeam2 = normalizeRoundPlaces(state?.roundPlacesTeam2, team2Players.length);
+		const allowedScreens: Screen[] = ['mode-select', 'team-setup', 'game'];
+		currentScreen = allowedScreens.includes(state?.currentScreen) ? state.currentScreen : 'mode-select';
+	}
+
+	let hasHydrated = $state(false);
+
+	onMount(() => {
+		const saved = loadPersistedState();
+		if (saved) applyPersistedState(saved);
+		hasHydrated = true;
+	});
+
+	$effect(() => {
+		if (!hasHydrated) return;
+		if (typeof localStorage === 'undefined') return;
+		if (currentScreen === 'winner') {
+			clearPersistedState();
+			return;
+		}
+		try {
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPersistedState()));
+		} catch (err) {
+			console.warn('Unable to persist game state', err);
+		}
+	});
+
 	const levelCards = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
 	function getLevelCard(level: number): string {
@@ -148,6 +340,20 @@
 		const team1 = roundPlacesTeam1.map((v) => Number(v));
 		const team2 = roundPlacesTeam2.map((v) => Number(v));
 		return { team1, team2 };
+	}
+
+	function togglePlayerPlace(team: TeamId, index: number, value: string) {
+		if (team === 1) {
+			const current = roundPlacesTeam1[index];
+			const next = [...roundPlacesTeam1];
+			next[index] = current === value ? '' : value;
+			roundPlacesTeam1 = next;
+			return;
+		}
+		const current = roundPlacesTeam2[index];
+		const next = [...roundPlacesTeam2];
+		next[index] = current === value ? '' : value;
+		roundPlacesTeam2 = next;
 	}
 
 	function deriveWinnerAndComboFromPlaces(places: { team1: number[]; team2: number[] }): { winnerTeam: TeamId; combo: Combo } | null {
@@ -370,6 +576,17 @@
 		return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 	}
 
+	function isIOS(): boolean {
+		return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+	}
+
+	function getGameShareText(): string {
+		const rounds = gameDuration || Math.max(roundNumber - 1, 0);
+		const finalScore = `${team1Name} ${getLevelCard(team1Level)} - ${team2Name} ${getLevelCard(team2Level)}`;
+		const winner = gameWinner ? `${gameWinner} wins! ` : '';
+		return `${winner}Rounds: ${rounds}. Final: ${finalScore}.`;
+	}
+
 	async function shareOrDownloadGraphImage() {
 		exportError = '';
 		if (!graphEl) return;
@@ -387,7 +604,7 @@
 			});
 
 			const nav = navigator as unknown as {
-				share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
+				share?: (data: { files?: File[]; title?: string; text?: string; url?: string }) => Promise<void>;
 				canShare?: (data: { files?: File[] }) => boolean;
 			};
 			const win = window as unknown as {
@@ -397,6 +614,21 @@
 				}) => Promise<{ createWritable: () => Promise<{ write: (data: Blob) => Promise<void>; close: () => Promise<void> }> }>;
 			};
 
+			const shareTitle = 'Guandan Scorer';
+			const shareText = getGameShareText();
+			const shareUrl = typeof location !== 'undefined' ? location.href : undefined;
+
+			// iOS Safari often can't share files; prefer opening the native share sheet with text/link
+			// instead of falling back to an <a download> flow that triggers a download prompt.
+			if (isIOS() && nav.share) {
+				if (nav.canShare?.({ files: [file] })) {
+					await nav.share({ title: shareTitle, text: 'Player placements over rounds', files: [file] });
+					return;
+				}
+				await nav.share({ title: shareTitle, text: shareText, url: shareUrl });
+				return;
+			}
+
 			// Mobile: prefer the native share sheet.
 			if (isProbablyMobile() && nav.share && nav.canShare?.({ files: [file] })) {
 				await nav.share({
@@ -404,6 +636,12 @@
 					text: 'Player placements over rounds',
 					files: [file]
 				});
+				return;
+			}
+
+			// If share exists but file-sharing doesn't, share a link/text rather than forcing a download.
+			if (isProbablyMobile() && nav.share) {
+				await nav.share({ title: shareTitle, text: shareText, url: shareUrl });
 				return;
 			}
 
@@ -434,6 +672,7 @@
 			a.download = file.name;
 			a.click();
 		} catch (e) {
+			if (e instanceof DOMException && e.name === 'AbortError') return;
 			exportError = e instanceof Error ? e.message : 'Failed to export image';
 		} finally {
 			isExportingGraph = false;
@@ -798,34 +1037,58 @@
 								<div class="placements-team">
 									<h4>{team1Name}</h4>
 									{#each team1Players as player, i}
-										<label class="placement-row">
+										<div class="placement-row">
 											<span class="placement-player">{player}</span>
-											<select class="placement-select" bind:value={roundPlacesTeam1[i]}>
-												<option value="">--</option>
+											<div class="place-buttons" role="group" aria-label={`Place for ${player}`}>
 												{#each Array(getRoundPlacesCount()) as _, p}
 													{@const value = String(p + 1)}
 													{@const chosen = getChosenPlaces()}
-													<option value={value} disabled={chosen.has(value) && roundPlacesTeam1[i] !== value}>{p + 1}</option>
+													{@const rowSelected = roundPlacesTeam1[i] !== ''}
+													{@const lockedOut = rowSelected && roundPlacesTeam1[i] !== value}
+													{@const takenByOther = chosen.has(value) && roundPlacesTeam1[i] !== value}
+													<button
+														type="button"
+														class="place-btn"
+														class:selected={roundPlacesTeam1[i] === value}
+														class:covered={takenByOther || lockedOut}
+														disabled={takenByOther || lockedOut}
+														onclick={() => togglePlayerPlace(1, i, value)}
+														aria-label={takenByOther ? 'Taken' : lockedOut ? 'Locked' : `Place ${value}`}
+													>
+														{value}
+													</button>
 												{/each}
-											</select>
-										</label>
+											</div>
+										</div>
 									{/each}
 								</div>
 
 								<div class="placements-team">
 									<h4>{team2Name}</h4>
 									{#each team2Players as player, i}
-										<label class="placement-row">
+										<div class="placement-row">
 											<span class="placement-player">{player}</span>
-											<select class="placement-select" bind:value={roundPlacesTeam2[i]}>
-												<option value="">--</option>
+											<div class="place-buttons" role="group" aria-label={`Place for ${player}`}>
 												{#each Array(getRoundPlacesCount()) as _, p}
 													{@const value = String(p + 1)}
 													{@const chosen = getChosenPlaces()}
-													<option value={value} disabled={chosen.has(value) && roundPlacesTeam2[i] !== value}>{p + 1}</option>
+													{@const rowSelected = roundPlacesTeam2[i] !== ''}
+													{@const lockedOut = rowSelected && roundPlacesTeam2[i] !== value}
+													{@const takenByOther = chosen.has(value) && roundPlacesTeam2[i] !== value}
+													<button
+														type="button"
+														class="place-btn"
+														class:selected={roundPlacesTeam2[i] === value}
+														class:covered={takenByOther || lockedOut}
+														disabled={takenByOther || lockedOut}
+														onclick={() => togglePlayerPlace(2, i, value)}
+														aria-label={takenByOther ? 'Taken' : lockedOut ? 'Locked' : `Place ${value}`}
+													>
+														{value}
+													</button>
 												{/each}
-											</select>
-										</label>
+											</div>
+										</div>
 									{/each}
 								</div>
 							</div>
@@ -1572,15 +1835,44 @@
 		flex: 1;
 	}
 
-	.placement-select {
-		width: 90px;
-		padding: 0.5rem 0.6rem;
+	.place-buttons {
+		display: flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	.place-btn {
+		position: relative;
+		overflow: hidden;
+		width: 42px;
+		height: 36px;
 		border-radius: 10px;
 		border: 2px solid #e9ecef;
 		background: white;
-		font-weight: 700;
-		text-align: center;
-		outline: none;
+		font-weight: 800;
+		color: #333;
+		cursor: pointer;
+		transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease;
+	}
+
+	.place-btn:hover:enabled {
+		transform: translateY(-1px);
+		border-color: #667eea;
+	}
+
+	.place-btn.selected {
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		border-color: transparent;
+		color: white;
+	}
+
+	.place-btn.covered::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background: rgba(120, 120, 120, 0.55);
+		pointer-events: none;
 	}
 
 	.placements-actions {
@@ -1976,10 +2268,24 @@
 		color: #e0e0e0;
 	}
 
-	.container.dark-mode .placement-select {
+	.container.dark-mode .place-btn {
 		background: #2a2a3e;
 		border-color: #3a3a4e;
 		color: #e0e0e0;
+	}
+
+	.container.dark-mode .place-btn:hover:enabled {
+		border-color: #8b9aff;
+	}
+
+	.container.dark-mode .place-btn.selected {
+		background: linear-gradient(135deg, #4a5a9a 0%, #5a4a8a 100%);
+		border-color: transparent;
+		color: #e0e0e0;
+	}
+
+	.container.dark-mode .place-btn.covered::after {
+		background: rgba(120, 120, 120, 0.5);
 	}
 
 	.container.dark-mode .placements-graph {
