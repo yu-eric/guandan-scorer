@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { toPng } from 'html-to-image';
 
 	type GameMode = '2v2' | '3v3';
 	type Screen = 'mode-select' | 'team-setup' | 'game' | 'winner';
-	type WinningTeam = 1 | 2 | null;
+	type TeamId = 1 | 2;
+	type TrumpTeam = TeamId | null;
+	type Combo = { nameZh: string; nameEn: string; positions: string; points: number; description: string };
 	type RoundHistory = {
 		round: number;
 		winner: string;
@@ -11,6 +14,11 @@
 		points: number;
 		team1Level: number;
 		team2Level: number;
+		trumpTeam: TrumpTeam;
+		aceChallengeTeam: TeamId | null;
+		aceChallengeRemaining: number;
+		team1Places: number[];
+		team2Places: number[];
 	};
 
 	let currentScreen = $state<Screen>('mode-select');
@@ -22,16 +30,23 @@
 	let team1Players = $state<string[]>(['Player 1', 'Player 2']);
 	let team2Players = $state<string[]>(['Player 3', 'Player 4']);
 	let showScoring = $state(false);
-	let selectedWinner = $state<WinningTeam>(null);
 	let roundHistory = $state<RoundHistory[]>([]);
 	let roundNumber = $state(1);
-	let showScoringInfo = $state(false);
 	let isInitialSetup = $state(true);
 	let gameWinner = $state<string>('');
 	let gameDuration = $state(0);
 	let showOptions = $state(false);
 	let darkMode = $state(false);
 	let language = $state<'en' | 'zh'>('en');
+	let trumpTeam = $state<TrumpTeam>(null);
+	let aceChallengeTeam = $state<TeamId | null>(null);
+	let aceChallengeRemaining = $state(0);
+	let roundPlacesTeam1 = $state<string[]>(['', '']);
+	let roundPlacesTeam2 = $state<string[]>(['', '']);
+	let graphEl = $state<HTMLDivElement | null>(null);
+	let isExportingGraph = $state(false);
+	let exportError = $state('');
+	let showResetConfirm = $state(false);
 
 	const levelCards = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
@@ -45,9 +60,7 @@
 	const combos2v2 = [
 		{ nameZh: '双下', nameEn: 'Double Down', positions: '1-2', points: 3, description: 'Both finish 1st and 2nd' },
 		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-3', points: 2, description: 'One finishes 1st, other 3rd' },
-		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-4', points: 2, description: 'One finishes 1st, other 4th' },
-		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3', points: 1, description: 'Finish 2nd and 3rd' },
-		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-4', points: 1, description: 'Finish 2nd and 4th' }
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-4', points: 1, description: 'One finishes 1st, other 4th' }
 	];
 
 	// Scoring combos for 3v3 mode
@@ -62,12 +75,12 @@
 		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-4-5', points: 2, description: 'One finishes 1st' },
 		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-4-6', points: 2, description: 'One finishes 1st' },
 		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-5-6', points: 2, description: 'One finishes 1st' },
-		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-4', points: 1, description: 'None finish 1st' },
-		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-5', points: 1, description: 'None finish 1st' },
-		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-6', points: 1, description: 'None finish 1st' },
-		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-4-5', points: 1, description: 'None finish 1st' },
-		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-4-6', points: 1, description: 'None finish 1st' },
-		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-5-6', points: 1, description: 'None finish 1st' }
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-4', points: 0, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-5', points: 0, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-6', points: 0, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-4-5', points: 0, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-4-6', points: 0, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-5-6', points: 0, description: 'None finish 1st' }
 	];
 
 	function getComboName(combo: { nameZh: string; nameEn: string }) {
@@ -78,15 +91,91 @@
 		return gameMode === '2v2' ? combos2v2 : combos3v3;
 	}
 
+	function getTrumpLevel(): number {
+		if (trumpTeam === null) return 0;
+		return trumpTeam === 1 ? team1Level : team2Level;
+	}
+
+	function getTrumpTeamName(): string {
+		if (trumpTeam === null) return language === 'en' ? 'None' : '无';
+		return trumpTeam === 1 ? team1Name : team2Name;
+	}
+
+	function getEffectivePoints(combo: { points: number }, winnerTeam: TeamId): number {
+		// Round 1: no trump, no switch-cost.
+		if (trumpTeam === null) return combo.points;
+		// If the non-trump side wins, spend 1 point to switch trump before adding.
+		const switching = winnerTeam !== trumpTeam;
+		return switching ? Math.max(combo.points - 1, 0) : combo.points;
+	}
+
+	function isQualifyingAceWin(combo: { positions: string }): boolean {
+		const positions = combo.positions.split('-').map(Number);
+		return (positions.includes(1) && positions.includes(2)) || (positions.includes(1) && positions.includes(3));
+	}
+
+	function resetRoundPlaces() {
+		roundPlacesTeam1 = Array(team1Players.length).fill('');
+		roundPlacesTeam2 = Array(team2Players.length).fill('');
+	}
+
+	function openScoring() {
+		resetRoundPlaces();
+		showScoring = !showScoring;
+	}
+
+	function getRoundPlacesCount(): number {
+		return gameMode === '2v2' ? 4 : 6;
+	}
+
+	function getChosenPlaces(): Set<string> {
+		const chosen = new Set<string>();
+		for (const v of roundPlacesTeam1) if (v) chosen.add(v);
+		for (const v of roundPlacesTeam2) if (v) chosen.add(v);
+		return chosen;
+	}
+
+	function isRoundPlacesCompleteAndUnique(): boolean {
+		const totalPlayers = team1Players.length + team2Players.length;
+		const all = [...roundPlacesTeam1, ...roundPlacesTeam2];
+		if (all.some((v) => !v)) return false;
+		const chosen = new Set(all);
+		return chosen.size === totalPlayers;
+	}
+
+	function parseRoundPlaces(): { team1: number[]; team2: number[] } | null {
+		if (!isRoundPlacesCompleteAndUnique()) return null;
+		const team1 = roundPlacesTeam1.map((v) => Number(v));
+		const team2 = roundPlacesTeam2.map((v) => Number(v));
+		return { team1, team2 };
+	}
+
+	function deriveWinnerAndComboFromPlaces(places: { team1: number[]; team2: number[] }): { winnerTeam: TeamId; combo: Combo } | null {
+		const team1HasFirst = places.team1.includes(1);
+		const team2HasFirst = places.team2.includes(1);
+		if (team1HasFirst === team2HasFirst) return null;
+
+		const winnerTeam: TeamId = team1HasFirst ? 1 : 2;
+		const winnerPlaces = (winnerTeam === 1 ? places.team1 : places.team2).slice().sort((a, b) => a - b);
+		const positions = winnerPlaces.join('-');
+		const combo = getCurrentCombos().find((c) => c.positions === positions);
+		if (!combo) return null;
+		return { winnerTeam, combo };
+	}
+
 	function selectMode(mode: GameMode) {
 		gameMode = mode;
 		// Reset player arrays based on mode
 		if (mode === '2v2') {
 			team1Players = ['Player 1', 'Player 2'];
 			team2Players = ['Player 3', 'Player 4'];
+			roundPlacesTeam1 = ['', ''];
+			roundPlacesTeam2 = ['', ''];
 		} else {
 			team1Players = ['Player 1', 'Player 2', 'Player 3'];
 			team2Players = ['Player 4', 'Player 5', 'Player 6'];
+			roundPlacesTeam1 = ['', '', ''];
+			roundPlacesTeam2 = ['', '', ''];
 		}
 		currentScreen = 'team-setup';
 	}
@@ -105,76 +194,85 @@
 		currentScreen = 'mode-select';
 	}
 
-	function selectWinningTeam(team: 1 | 2) {
-		selectedWinner = team;
-	}
+	function scoreRoundFromPlaces() {
+		const places = parseRoundPlaces();
+		if (!places) return;
+		const derived = deriveWinnerAndComboFromPlaces(places);
+		if (!derived) return;
 
-	function checkWinCondition(combo: { nameZh: string; nameEn: string; positions: string; points: number }) {
-		// Win condition: be on level A (14) AND win with no dweller
-		// No dweller means:
-		// - 2v2: no player finished in 4th place
-		// - 3v3: no player finished in 6th place
-		
-		const isOnAce = (selectedWinner === 1 && team1Level === 14) || (selectedWinner === 2 && team2Level === 14);
-		
-		if (!isOnAce) return false;
-		
-		// Check if any player on winning team finished last
-		const positions = combo.positions.split('-').map(Number);
-		const lastPlace = gameMode === '2v2' ? 4 : 6;
-		const noDweller = !positions.includes(lastPlace);
-		
-		if (noDweller) {
-			gameWinner = selectedWinner === 1 ? team1Name : team2Name;
-			gameDuration = roundNumber - 1;
-			currentScreen = 'winner';
-			return true;
-		}
-		
-		return false;
-	}
-
-	function scoreGame(combo: { nameZh: string; nameEn: string; positions: string; points: number }) {
-		if (selectedWinner === null) return;
-
-		const winnerName = selectedWinner === 1 ? team1Name : team2Name;
-		const points = combo.points;
+		const { winnerTeam, combo } = derived;
+		const winnerName = winnerTeam === 1 ? team1Name : team2Name;
+		const points = getEffectivePoints(combo, winnerTeam);
 		const comboName = getComboName(combo);
+		const challengeWasActiveAtStart = aceChallengeTeam !== null;
+		const winnerLevelBefore = winnerTeam === 1 ? team1Level : team2Level;
 
-		// Check for win condition BEFORE updating levels
-		// (team must be on A and win with no dweller)
-		const wonGame = checkWinCondition(combo);
+		// If a team is already on Ace, they must win a qualifying combo to win the match.
+		const wonGame = winnerLevelBefore === 14 && isQualifyingAceWin(combo);
 
-		// Add to history
+		// Add to history (store pre-round state for undo)
 		roundHistory.push({
 			round: roundNumber,
 			winner: winnerName,
 			combo: `${comboName} (${combo.positions})`,
 			points: points,
 			team1Level: team1Level,
-			team2Level: team2Level
+			team2Level: team2Level,
+			trumpTeam: trumpTeam,
+			aceChallengeTeam: aceChallengeTeam,
+			aceChallengeRemaining: aceChallengeRemaining,
+			team1Places: places.team1,
+			team2Places: places.team2
 		});
-
-		// Update levels
-		if (selectedWinner === 1) {
-			team1Level += points;
-		} else {
-			team2Level += points;
-		}
 
 		// If won, show winner screen
 		if (wonGame) {
+			gameWinner = winnerName;
+			gameDuration = roundNumber;
+			currentScreen = 'winner';
+			showScoring = false;
 			return;
+		}
+
+		// Round 1: establish trump, but don't treat it as a "switch".
+		if (trumpTeam === null) {
+			trumpTeam = winnerTeam;
+		} else if (winnerTeam !== trumpTeam) {
+			// If the non-trump side wins, switch trump.
+			trumpTeam = winnerTeam;
+		}
+
+		// Update levels (cap at Ace)
+		if (winnerTeam === 1) {
+			team1Level = Math.min(team1Level + points, 14);
+		} else {
+			team2Level = Math.min(team2Level + points, 14);
+		}
+
+		// If a team just reached Ace this round, start the 3-game countdown.
+		const winnerLevelAfter = winnerTeam === 1 ? team1Level : team2Level;
+		if (winnerLevelBefore < 14 && winnerLevelAfter === 14) {
+			aceChallengeTeam = winnerTeam;
+			aceChallengeRemaining = 3;
+		}
+
+		// If the Ace challenge was already active at the start of this round, decrement.
+		if (challengeWasActiveAtStart && aceChallengeTeam !== null) {
+			aceChallengeRemaining = Math.max(aceChallengeRemaining - 1, 0);
+			if (aceChallengeRemaining === 0) {
+				if (aceChallengeTeam === 1) team1Level = 2;
+				if (aceChallengeTeam === 2) team2Level = 2;
+				aceChallengeTeam = null;
+				aceChallengeRemaining = 0;
+			}
 		}
 
 		// Reset and close
 		roundNumber++;
-		selectedWinner = null;
 		showScoring = false;
 	}
 
 	function cancelScoring() {
-		selectedWinner = null;
 		showScoring = false;
 	}
 
@@ -187,12 +285,28 @@
 		team2Players = ['Player 3', 'Player 4'];
 		roundHistory = [];
 		roundNumber = 1;
-		selectedWinner = null;
 		currentScreen = 'mode-select';
 		showScoring = false;
 		isInitialSetup = true;
 		gameWinner = '';
 		gameDuration = 0;
+		trumpTeam = null;
+		aceChallengeTeam = null;
+		aceChallengeRemaining = 0;
+		roundPlacesTeam1 = ['', ''];
+		roundPlacesTeam2 = ['', ''];
+		graphEl = null;
+		isExportingGraph = false;
+		exportError = '';
+		showResetConfirm = false;
+	}
+
+	function requestResetGame() {
+		showResetConfirm = true;
+	}
+
+	function confirmResetGame() {
+		resetGame();
 	}
 
 	function undoLastRound() {
@@ -201,8 +315,129 @@
 		const lastRound = roundHistory[roundHistory.length - 1];
 		team1Level = lastRound.team1Level;
 		team2Level = lastRound.team2Level;
+		trumpTeam = lastRound.trumpTeam;
+		aceChallengeTeam = lastRound.aceChallengeTeam;
+		aceChallengeRemaining = lastRound.aceChallengeRemaining;
 		roundHistory.pop();
 		roundNumber--;
+	}
+
+	const playerColors = [
+		'#f5576c',
+		'#4facfe',
+		'#fcb69f',
+		'#00c2a8',
+		'#ffd166',
+		'#a78bfa'
+	];
+
+	function getAllPlayers(): Array<{ key: string; name: string; team: TeamId; color: string }> {
+		const team1 = team1Players.map((name, index) => ({ key: `t1-${index}`, name, team: 1 as const }));
+		const team2 = team2Players.map((name, index) => ({ key: `t2-${index}`, name, team: 2 as const }));
+		return [...team1, ...team2].map((p, i) => ({ ...p, color: playerColors[i % playerColors.length] }));
+	}
+
+	function getPlayerPlacesForRound(round: RoundHistory, playerKey: string): number | null {
+		const [teamPart, idxPart] = playerKey.split('-');
+		const index = Number(idxPart);
+		if (teamPart === 't1') return round.team1Places?.[index] ?? null;
+		if (teamPart === 't2') return round.team2Places?.[index] ?? null;
+		return null;
+	}
+
+	function getPlayerPlacesOverGame(playerKey: string): number[] {
+		return roundHistory
+			.map((r) => getPlayerPlacesForRound(r, playerKey))
+			.filter((v): v is number => typeof v === 'number');
+	}
+
+	function getPlayerAveragePlace(playerKey: string): number {
+		const values = getPlayerPlacesOverGame(playerKey);
+		if (values.length === 0) return NaN;
+		return values.reduce((sum, v) => sum + v, 0) / values.length;
+	}
+
+	function getPlayerAverageRows(): Array<{ key: string; name: string; team: TeamId; avg: number }> {
+		return getAllPlayers()
+			.map((p) => ({ key: p.key, name: p.name, team: p.team, avg: getPlayerAveragePlace(p.key) }))
+			.filter((p) => Number.isFinite(p.avg))
+			.sort((a, b) => a.avg - b.avg);
+	}
+
+	function isProbablyMobile(): boolean {
+		const nav = navigator as unknown as { userAgentData?: { mobile?: boolean } };
+		if (typeof nav.userAgentData?.mobile === 'boolean') return !!nav.userAgentData.mobile;
+		return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+	}
+
+	async function shareOrDownloadGraphImage() {
+		exportError = '';
+		if (!graphEl) return;
+		try {
+			isExportingGraph = true;
+			const dataUrl = await toPng(graphEl, {
+				cacheBust: true,
+				pixelRatio: 2,
+				backgroundColor: '#ffffff'
+			});
+			const res = await fetch(dataUrl);
+			const blob = await res.blob();
+			const file = new File([blob], `guandan-placements-${new Date().toISOString().slice(0, 10)}.png`, {
+				type: 'image/png'
+			});
+
+			const nav = navigator as unknown as {
+				share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
+				canShare?: (data: { files?: File[] }) => boolean;
+			};
+			const win = window as unknown as {
+				showSaveFilePicker?: (options?: {
+					suggestedName?: string;
+					types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+				}) => Promise<{ createWritable: () => Promise<{ write: (data: Blob) => Promise<void>; close: () => Promise<void> }> }>;
+			};
+
+			// Mobile: prefer the native share sheet.
+			if (isProbablyMobile() && nav.share && nav.canShare?.({ files: [file] })) {
+				await nav.share({
+					title: 'Guandan placements',
+					text: 'Player placements over rounds',
+					files: [file]
+				});
+				return;
+			}
+
+			// Desktop: prefer native save dialog when available (Chrome/Edge File System Access API).
+			if (win.showSaveFilePicker) {
+				const handle = await win.showSaveFilePicker({
+					suggestedName: file.name,
+					types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }]
+				});
+				const writable = await handle.createWritable();
+				await writable.write(blob);
+				await writable.close();
+				return;
+			}
+
+			// Otherwise, if share is available (some desktops), use it.
+			if (nav.share && nav.canShare?.({ files: [file] })) {
+				await nav.share({
+					title: 'Guandan placements',
+					text: 'Player placements over rounds',
+					files: [file]
+				});
+				return;
+			}
+
+			const a = document.createElement('a');
+			a.href = dataUrl;
+			a.download = file.name;
+			a.click();
+		} catch (e) {
+			exportError = e instanceof Error ? e.message : 'Failed to export image';
+		} finally {
+			isExportingGraph = false;
+		}
 	}
 </script>
 
@@ -211,7 +446,6 @@
 		<!-- Mode Selection Screen -->
 		<div class="screen-content mode-select-screen">
 			<div class="mode-header">
-				<button class="options-btn settings-btn-initial" onclick={() => (showOptions = !showOptions)}>⚙️</button>
 				<h1>🎴 Guandan Scorer</h1>
 			</div>
 			<div class="mode-cards">
@@ -299,7 +533,7 @@
 		</div>
 	{:else if currentScreen === 'winner'}
 		<!-- Winner Screen -->
-		<div class="screen-content winner-screen">
+			<div class="screen-content winner-screen">
 			<div class="winner-card">
 				<div class="trophy">🏆</div>
 				<h1>Game Over!</h1>
@@ -345,16 +579,123 @@
 							</table>
 						</div>
 					</div>
+
+					<div class="game-summary">
+						<h3>Player Placements</h3>
+						<div class="placements-actions">
+							<button class="share-btn" onclick={shareOrDownloadGraphImage} disabled={isExportingGraph}>
+								{isExportingGraph ? 'Preparing…' : 'Share / Download Graph'}
+							</button>
+							{#if exportError}
+								<div class="export-error">{exportError}</div>
+							{/if}
+						</div>
+						<div class="placements-graph" bind:this={graphEl}>
+							<svg viewBox="0 0 760 320" role="img" aria-label="Player placements by round">
+								{#if roundHistory.length === 1}
+									<text x="380" y="160" text-anchor="middle" fill="#666" font-size="16">Add more rounds to see trends</text>
+								{:else}
+									{@const rounds = roundHistory.length}
+									{@const placesCount = getRoundPlacesCount()}
+									{@const padL = 60}
+									{@const padR = 20}
+									{@const padT = 20}
+									{@const padB = 40}
+									{@const w = 760}
+									{@const h = 320}
+									{@const plotW = w - padL - padR}
+									{@const plotH = h - padT - padB}
+									<rect x={padL} y={padT} width={plotW} height={plotH} fill="#fff" opacity="0.0" />
+									{#each Array(placesCount) as _, i}
+										{@const place = i + 1}
+										{@const y = padT + (place - 1) * (plotH / (placesCount - 1))}
+										<line x1={padL} y1={y} x2={w - padR} y2={y} stroke="rgba(0,0,0,0.08)" />
+										<text x={padL - 10} y={y + 4} text-anchor="end" fill="#666" font-size="12">{place}</text>
+									{/each}
+
+									{#each getAllPlayers() as player}
+										{@const values = getPlayerPlacesOverGame(player.key)}
+										{@const points = values
+											.map((place, idx) => {
+												const x = padL + (idx * plotW) / (rounds - 1);
+												const y = padT + (place - 1) * (plotH / (placesCount - 1));
+												return `${x},${y}`;
+											})
+											.join(' ')}
+										<polyline points={points} fill="none" stroke={player.color} stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
+											<title>{player.name}</title>
+										</polyline>
+									{/each}
+
+									{#each Array(rounds) as _, i}
+										{@const x = padL + (i * plotW) / (rounds - 1)}
+										<text x={x} y={h - 14} text-anchor="middle" fill="#666" font-size="12">{i + 1}</text>
+									{/each}
+								{/if}
+							</svg>
+							<div class="placements-legend">
+								{#each getAllPlayers() as player}
+									<div class="legend-item">
+										<svg class="legend-line" viewBox="0 0 40 8" aria-hidden="true">
+											<line
+												x1="2"
+												y1="4"
+												x2="38"
+												y2="4"
+												stroke={player.color}
+												stroke-width="3"
+												stroke-linecap="round"
+											/>
+										</svg>
+										<span class="legend-name">{player.name}</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+
+						<div class="summary-table">
+							<table>
+								<thead>
+									<tr>
+										<th>Player</th>
+										<th>Team</th>
+										<th>Avg Place</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each getPlayerAverageRows() as row}
+										<tr>
+											<td>{row.name}</td>
+											<td>{row.team === 1 ? team1Name : team2Name}</td>
+											<td>{row.avg.toFixed(2)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</div>
 				{/if}
 
-				<button class="new-game-btn" onclick={resetGame}>🎴 New Game</button>
+				<button class="new-game-btn" onclick={requestResetGame}>🎴 New Game</button>
 			</div>
 		</div>
 	{:else}
 		<!-- Game Screen -->
 		<div class="screen-content game-screen">
 			<header>
-				<h1>🎴 Guandan Scorer</h1>
+				<div class="title-area">
+					<h1>🎴 Guandan Scorer</h1>
+					<div class="trump-badge">
+						<span class="trump-label">Trump</span>
+						<span class="trump-team">{getTrumpTeamName()}</span>
+						{#if trumpTeam !== null}
+							<span class="trump-card">{getLevelCard(getTrumpLevel())}</span>
+							<span class="trump-level">(Lvl {getTrumpLevel()})</span>
+						{:else}
+							<span class="trump-level">(Round 1)</span>
+						{/if}
+					</div>
+				</div>
 				<div class="header-buttons">
 					<button class="options-btn" onclick={() => (showOptions = !showOptions)}>⚙️</button>
 					<button class="edit-btn" onclick={backToSetup}>✏️ Edit Teams</button>
@@ -363,7 +704,7 @@
 
 			<div class="teams-container">
 				<!-- Team 1 -->
-				<div class="team-card team1">
+				<div class="team-card team1" class:trump-team={trumpTeam === 1}>
 					<div class="team-header">
 						<h2>{team1Name}</h2>
 						<div class="level-display">
@@ -382,7 +723,7 @@
 				</div>
 
 				<!-- Team 2 -->
-				<div class="team-card team2">
+				<div class="team-card team2" class:trump-team={trumpTeam === 2}>
 					<div class="team-header">
 						<h2>{team2Name}</h2>
 						<div class="level-display">
@@ -404,13 +745,10 @@
 			</div>
 
 			<div class="actions">
-				<button class="score-btn" onclick={() => (showScoring = !showScoring)}>
+				<button class="score-btn" onclick={openScoring}>
 					📊 Score Round
 				</button>
-				<button class="info-btn" onclick={() => (showScoringInfo = !showScoringInfo)}>
-					ℹ️ Scoring Info
-				</button>
-				<button class="reset-btn" onclick={resetGame}>🔄 Reset Game</button>
+				<button class="reset-btn" onclick={requestResetGame}>🔄 Reset Game</button>
 			</div>
 
 			<!-- Round History Panel -->
@@ -447,93 +785,57 @@
 				</div>
 			{/if}
 
-			<!-- Scoring Info Modal -->
-			{#if showScoringInfo}
-				<div class="info-modal-overlay" onclick={() => (showScoringInfo = false)} onkeydown={(e) => e.key === 'Escape' && (showScoringInfo = false)} role="button" tabindex="0">
-					<div class="info-modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-						<div class="info-header">
-							<h3>Scoring Rules</h3>
-							<button class="close-btn" onclick={() => (showScoringInfo = false)}>✕</button>
-						</div>
-						<div class="info-content">
-							{#if gameMode === '2v2'}
-								<h4>2v2 Mode</h4>
-								<table class="info-table">
-									<thead>
-										<tr>
-											<th>Combo</th>
-											<th>Positions</th>
-											<th>Points</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each combos2v2 as combo}
-											<tr>
-												<td>{getComboName(combo)}</td>
-												<td>{combo.positions}</td>
-												<td>+{combo.points}</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							{:else}
-								<h4>3v3 Mode</h4>
-								<table class="info-table">
-									<thead>
-										<tr>
-											<th>Combo</th>
-											<th>Positions</th>
-											<th>Points</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each combos3v3 as combo}
-											<tr>
-												<td>{getComboName(combo)}</td>
-												<td>{combo.positions}</td>
-												<td>+{combo.points}</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							{/if}
-						</div>
-					</div>
-				</div>
-			{/if}
-
 			<!-- Scoring Modal -->
 			{#if showScoring}
-				<div class="info-modal-overlay" onclick={() => (showScoring = false, selectedWinner = null)} onkeydown={(e) => e.key === 'Escape' && (showScoring = false, selectedWinner = null)} role="button" tabindex="0">
+				<div class="info-modal-overlay" onclick={() => (showScoring = false)} onkeydown={(e) => e.key === 'Escape' && (showScoring = false)} role="button" tabindex="0">
 					<div class="info-modal scoring-modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
 						<div class="info-header">
-							<h3>{selectedWinner === null ? 'Select Winning Team' : `Select Combo for ${selectedWinner === 1 ? team1Name : team2Name}`}</h3>
-							<button class="close-btn" onclick={() => (showScoring = false, selectedWinner = null)}>✕</button>
+							<h3>Enter Round Placements</h3>
+							<button class="close-btn" onclick={() => (showScoring = false)}>✕</button>
 						</div>
 						<div class="info-content scoring-content">
-							{#if selectedWinner === null}
-								<div class="team-selection">
-									<button class="team-select-btn team1" onclick={() => selectWinningTeam(1)}>
-										<span class="team-name">{team1Name}</span>
-										<span class="team-level">Level {getLevelCard(team1Level)}</span>
-									</button>
-									<button class="team-select-btn team2" onclick={() => selectWinningTeam(2)}>
-										<span class="team-name">{team2Name}</span>
-										<span class="team-level">Level {getLevelCard(team2Level)}</span>
-									</button>
-								</div>
-							{:else}
-								<div class="combo-grid">
-									{#each getCurrentCombos() as combo}
-										<button class="combo-btn" onclick={() => scoreGame(combo)}>
-											<span class="combo-name">{getComboName(combo)}</span>
-											<span class="combo-positions">{combo.positions}</span>
-											<span class="combo-points">+{combo.points}</span>
-										</button>
+							<div class="placements-grid">
+								<div class="placements-team">
+									<h4>{team1Name}</h4>
+									{#each team1Players as player, i}
+										<label class="placement-row">
+											<span class="placement-player">{player}</span>
+											<select class="placement-select" bind:value={roundPlacesTeam1[i]}>
+												<option value="">--</option>
+												{#each Array(getRoundPlacesCount()) as _, p}
+													{@const value = String(p + 1)}
+													{@const chosen = getChosenPlaces()}
+													<option value={value} disabled={chosen.has(value) && roundPlacesTeam1[i] !== value}>{p + 1}</option>
+												{/each}
+											</select>
+										</label>
 									{/each}
 								</div>
-								<button class="cancel-btn" onclick={() => (selectedWinner = null)}>← Back</button>
-							{/if}
+
+								<div class="placements-team">
+									<h4>{team2Name}</h4>
+									{#each team2Players as player, i}
+										<label class="placement-row">
+											<span class="placement-player">{player}</span>
+											<select class="placement-select" bind:value={roundPlacesTeam2[i]}>
+												<option value="">--</option>
+												{#each Array(getRoundPlacesCount()) as _, p}
+													{@const value = String(p + 1)}
+													{@const chosen = getChosenPlaces()}
+													<option value={value} disabled={chosen.has(value) && roundPlacesTeam2[i] !== value}>{p + 1}</option>
+												{/each}
+											</select>
+										</label>
+									{/each}
+								</div>
+							</div>
+
+							<div class="scoring-actions">
+								<button class="start-btn" disabled={!isRoundPlacesCompleteAndUnique()} onclick={scoreRoundFromPlaces}>
+									Score Round
+								</button>
+								<button class="cancel-btn" onclick={cancelScoring}>Cancel</button>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -577,6 +879,25 @@
 										>🇨🇳 中文</button>
 									</div>
 								</label>
+							</div>
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Reset Confirm Modal -->
+			{#if showResetConfirm}
+				<div class="info-modal-overlay" onclick={() => (showResetConfirm = false)} onkeydown={(e) => e.key === 'Escape' && (showResetConfirm = false)} role="button" tabindex="0">
+					<div class="info-modal options-modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+						<div class="info-header">
+							<h3>Confirm Reset</h3>
+							<button class="close-btn" onclick={() => (showResetConfirm = false)}>✕</button>
+						</div>
+						<div class="info-content options-content">
+							<p class="confirm-text">This will reset scores, rounds, and history. Continue?</p>
+							<div class="confirm-actions">
+								<button class="cancel-btn" onclick={() => (showResetConfirm = false)}>Cancel</button>
+								<button class="start-btn" onclick={confirmResetGame}>Reset</button>
 							</div>
 						</div>
 					</div>
@@ -646,12 +967,6 @@
 	.mode-header h1 {
 		margin: 0;
 		text-align: center;
-	}
-
-	.settings-btn-initial {
-		position: absolute;
-		top: 0;
-		right: 0;
 	}
 
 	.mode-select-screen h1 {
@@ -978,7 +1293,8 @@
 	/* Game Screen */
 	.game-screen header {
 		display: flex;
-		justify-content: space-between;
+		flex-direction: column;
+		justify-content: center;
 		align-items: center;
 		margin-bottom: 2rem;
 		flex-wrap: wrap;
@@ -992,10 +1308,63 @@
 		text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 	}
 
+	.title-area {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.trump-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.5rem 0.9rem;
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.2);
+		border: 2px solid rgba(255, 255, 255, 0.6);
+		backdrop-filter: blur(10px);
+		width: fit-content;
+		justify-content: center;
+	}
+
+	.trump-label {
+		font-weight: 700;
+		color: rgba(255, 255, 255, 0.9);
+		text-transform: uppercase;
+		letter-spacing: 1px;
+		font-size: 0.8rem;
+	}
+
+	.trump-team {
+		color: white;
+		font-weight: 700;
+		font-size: 1.1rem;
+	}
+
+	.trump-card {
+		background: rgba(255, 255, 255, 0.25);
+		border: 1px solid rgba(255, 255, 255, 0.35);
+		padding: 0.2rem 0.6rem;
+		border-radius: 999px;
+		color: white;
+		font-weight: 800;
+		font-size: 1.6rem;
+		min-width: 56px;
+		text-align: center;
+	}
+
+	.trump-level {
+		color: rgba(255, 255, 255, 0.9);
+		font-weight: 600;
+		font-size: 0.9rem;
+	}
+
 	.header-buttons {
 		display: flex;
 		gap: 0.5rem;
 		align-items: center;
+		justify-content: center;
 	}
 
 	.options-btn {
@@ -1051,6 +1420,13 @@
 		padding: 1.5rem;
 		box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
 		transition: transform 0.3s ease, box-shadow 0.3s ease;
+	}
+
+	.team-card.trump-team {
+		box-shadow:
+			0 0 0 2px rgba(255, 215, 0, 0.7),
+			0 0 18px rgba(255, 215, 0, 0.55),
+			0 0 42px rgba(255, 215, 0, 0.35);
 	}
 
 	.team-card:hover {
@@ -1129,6 +1505,7 @@
 		display: flex;
 		gap: 1rem;
 		justify-content: center;
+		align-items: center;
 		margin-bottom: 2rem;
 	}
 
@@ -1164,99 +1541,122 @@
 		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 	}
 
-	.team-selection {
+	.placements-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 		gap: 1.5rem;
+		align-items: start;
+	}
+
+	.placements-team h4 {
+		margin: 0 0 1rem 0;
+		color: #667eea;
+		font-size: 1.3rem;
+		text-align: center;
+	}
+
+	.placement-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.75rem 1rem;
+		background: rgba(102, 126, 234, 0.08);
+		border-radius: 12px;
+		margin-bottom: 0.75rem;
+	}
+
+	.placement-player {
+		font-weight: 600;
+		color: #333;
+		flex: 1;
+	}
+
+	.placement-select {
+		width: 90px;
+		padding: 0.5rem 0.6rem;
+		border-radius: 10px;
+		border: 2px solid #e9ecef;
+		background: white;
+		font-weight: 700;
+		text-align: center;
+		outline: none;
+	}
+
+	.placements-actions {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
 		margin-top: 1rem;
 	}
 
-	.team-select-btn {
-		padding: 2rem;
-		border: none;
-		border-radius: 20px;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.team-select-btn.team1 {
-		background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-		color: white;
-	}
-
-	.team-select-btn.team2 {
-		background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-		color: white;
-	}
-
-	.team-select-btn:hover {
-		transform: translateY(-5px) scale(1.02);
-		box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
-	}
-
-	.team-name {
-		font-size: 1.5rem;
-		font-weight: bold;
-	}
-
-	.team-level {
-		font-size: 1.1rem;
-		opacity: 0.9;
-	}
-
-	.combo-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-		gap: 1rem;
-		margin-top: 1.5rem;
-	}
-
-	.combo-btn {
-		padding: 1.5rem 1rem;
-		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-		border: none;
-		border-radius: 15px;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-		color: white;
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.combo-btn:hover {
-		transform: translateY(-5px);
-		box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
-	}
-
-	.combo-name {
-		font-size: 1.3rem;
-		font-weight: bold;
-		display: block;
-	}
-
-	.combo-positions {
+	.share-btn {
+		padding: 0.75rem 1.25rem;
 		font-size: 1rem;
-		opacity: 0.9;
+		font-weight: bold;
+		border: none;
+		border-radius: 50px;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: white;
+	}
+
+	.share-btn:hover:enabled {
+		transform: translateY(-2px);
+		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+	}
+
+	.share-btn:disabled {
+		opacity: 0.7;
+		cursor: not-allowed;
+	}
+
+	.export-error {
+		color: #d63031;
+		font-weight: 600;
+		font-size: 0.95rem;
+	}
+
+	.placements-graph {
+		margin-top: 1rem;
+		margin-bottom: 1.5rem;
+		background: white;
+		border-radius: 15px;
+		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+		padding: 0.75rem;
+	}
+
+	.placements-legend {
+		display: flex;
+		gap: 0.75rem 1.25rem;
+		flex-wrap: wrap;
+		justify-content: center;
+		align-items: center;
+		margin-top: 0.75rem;
+		padding-top: 0.75rem;
+		border-top: 1px solid rgba(0, 0, 0, 0.08);
+	}
+
+	.legend-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.legend-line {
+		width: 40px;
+		height: 10px;
 		display: block;
 	}
 
-	.combo-points {
-		font-size: 1.1rem;
-		background: rgba(255, 255, 255, 0.3);
-		padding: 0.4rem 0.8rem;
-		border-radius: 15px;
-		display: block;
-		font-weight: bold;
+	.legend-name {
+		font-weight: 700;
+		color: #333;
+		font-size: 0.95rem;
 	}
 
 	.cancel-btn {
@@ -1366,24 +1766,6 @@
 		background: rgba(102, 126, 234, 0.05);
 	}
 
-	.info-btn {
-		padding: 1rem 2.5rem;
-		font-size: 1.2rem;
-		font-weight: bold;
-		border: none;
-		border-radius: 50px;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-		background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
-		color: #333;
-	}
-
-	.info-btn:hover {
-		transform: translateY(-3px);
-		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-	}
-
 	.info-modal-overlay {
 		position: fixed;
 		top: 0;
@@ -1473,6 +1855,18 @@
 		overflow-y: auto;
 	}
 
+	.scoring-actions {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+		margin-top: 1.5rem;
+	}
+
+	.scoring-actions .cancel-btn {
+		margin-top: 0;
+	}
+
 	.options-modal {
 		max-width: 500px;
 	}
@@ -1487,6 +1881,22 @@
 
 	.option-group:last-child {
 		margin-bottom: 0;
+	}
+
+	.confirm-text {
+		margin: 0;
+		font-size: 1.1rem;
+		line-height: 1.4;
+		text-align: center;
+		color: #333;
+	}
+
+	.confirm-actions {
+		display: flex;
+		justify-content: center;
+		gap: 1rem;
+		margin-top: 1.5rem;
+		flex-wrap: wrap;
 	}
 
 	.option-label {
@@ -1539,49 +1949,6 @@
 		text-align: center;
 	}
 
-	.info-table {
-		width: 100%;
-		border-collapse: separate;
-		border-spacing: 0;
-		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-		border-radius: 15px;
-		overflow: hidden;
-	}
-
-	.info-table thead {
-		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-		color: white;
-	}
-
-	.info-table th,
-	.info-table td {
-		padding: 1rem;
-		text-align: center;
-	}
-
-	.info-table th {
-		font-weight: bold;
-		font-size: 1.1rem;
-	}
-
-	.info-table tbody tr {
-		background: white;
-		border-bottom: 1px solid #e9ecef;
-	}
-
-	.info-table tbody tr:last-child {
-		border-bottom: none;
-	}
-
-	.info-table tbody tr:hover {
-		background: rgba(102, 126, 234, 0.05);
-	}
-
-	.info-table td:first-child {
-		font-weight: bold;
-		color: #667eea;
-		font-size: 1.1rem;
-	}
 
 	.close-btn:hover {
 		background: rgba(0, 0, 0, 0.2);
@@ -1589,6 +1956,63 @@
 	}
 
 	/* Dark Mode Styles */
+	.container.dark-mode {
+		color: #e0e0e0;
+	}
+
+	.container.dark-mode .player {
+		background: #2a2a3e;
+	}
+
+	.container.dark-mode .level-display {
+		background: linear-gradient(135deg, rgba(74, 90, 154, 0.35) 0%, rgba(90, 74, 138, 0.35) 100%);
+	}
+
+	.container.dark-mode .placement-row {
+		background: rgba(255, 255, 255, 0.06);
+	}
+
+	.container.dark-mode .placement-player {
+		color: #e0e0e0;
+	}
+
+	.container.dark-mode .placement-select {
+		background: #2a2a3e;
+		border-color: #3a3a4e;
+		color: #e0e0e0;
+	}
+
+	.container.dark-mode .placements-graph {
+		background: #1e1e2e;
+	}
+
+	.container.dark-mode .placements-legend {
+		border-top-color: #3a3a4e;
+	}
+
+	.container.dark-mode .legend-name {
+		color: #e0e0e0;
+	}
+
+	.container.dark-mode .summary-table {
+		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+	}
+
+	.container.dark-mode .cancel-btn {
+		background: #2a2a3e;
+		border-color: #8b9aff;
+		color: #e0e0e0;
+	}
+
+	.container.dark-mode .cancel-btn:hover {
+		background: #8b9aff;
+		color: #1e1e2e;
+	}
+
+	.container.dark-mode .confirm-text {
+		color: #e0e0e0;
+	}
+
 	.dark-mode .mode-card,
 	.dark-mode .team-card,
 	.dark-mode .setup-team,
@@ -1651,25 +2075,21 @@
 	}
 
 	.dark-mode .history-table thead,
-	.dark-mode .info-table thead,
 	.dark-mode .summary-table thead {
 		background: linear-gradient(135deg, #4a5a9a 0%, #5a4a8a 100%);
 	}
 
 	.dark-mode .history-table tbody tr,
-	.dark-mode .info-table tbody tr,
 	.dark-mode .summary-table tbody tr {
 		background: #1e1e2e;
 	}
 
 	.dark-mode .history-table tbody tr:hover,
-	.dark-mode .info-table tbody tr:hover,
 	.dark-mode .summary-table tbody tr:hover {
 		background: #2a2a3e;
 	}
 
-	.dark-mode .history-table td,
-	.dark-mode .info-table td {
+	.dark-mode .history-table td {
 		color: #e0e0e0;
 		border-bottom-color: #3a3a4e;
 	}
@@ -1763,10 +2183,11 @@
 
 		.actions {
 			flex-direction: column;
+			align-items: center;
 		}
 
-		.combo-grid {
-			grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+		.placements-grid {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>
