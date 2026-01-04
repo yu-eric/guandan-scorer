@@ -29,6 +29,9 @@
 	let isInitialSetup = $state(true);
 	let gameWinner = $state<string>('');
 	let gameDuration = $state(0);
+	let showOptions = $state(false);
+	let darkMode = $state(false);
+	let language = $state<'en' | 'zh'>('en');
 
 	const levelCards = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
@@ -40,32 +43,36 @@
 
 	// Scoring combos for 2v2 mode
 	const combos2v2 = [
-		{ name: '双下', positions: '1-2', points: 3, description: 'Both finish 1st and 2nd' },
-		{ name: '单下', positions: '1-3', points: 2, description: 'One finishes 1st, other 3rd' },
-		{ name: '单下', positions: '1-4', points: 2, description: 'One finishes 1st, other 4th' },
-		{ name: '单上', positions: '2-3', points: 1, description: 'Finish 2nd and 3rd' },
-		{ name: '单上', positions: '2-4', points: 1, description: 'Finish 2nd and 4th' }
+		{ nameZh: '双下', nameEn: 'Double Down', positions: '1-2', points: 3, description: 'Both finish 1st and 2nd' },
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-3', points: 2, description: 'One finishes 1st, other 3rd' },
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-4', points: 2, description: 'One finishes 1st, other 4th' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3', points: 1, description: 'Finish 2nd and 3rd' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-4', points: 1, description: 'Finish 2nd and 4th' }
 	];
 
 	// Scoring combos for 3v3 mode
 	const combos3v3 = [
-		{ name: '三下', positions: '1-2-3', points: 4, description: 'All three finish 1st, 2nd, 3rd' },
-		{ name: '两下半', positions: '1-2-4', points: 3, description: 'Two finish 1st and 2nd' },
-		{ name: '两下半', positions: '1-2-5', points: 3, description: 'Two finish 1st and 2nd' },
-		{ name: '两下半', positions: '1-2-6', points: 3, description: 'Two finish 1st and 2nd' },
-		{ name: '单下', positions: '1-3-4', points: 2, description: 'One finishes 1st' },
-		{ name: '单下', positions: '1-3-5', points: 2, description: 'One finishes 1st' },
-		{ name: '单下', positions: '1-3-6', points: 2, description: 'One finishes 1st' },
-		{ name: '单下', positions: '1-4-5', points: 2, description: 'One finishes 1st' },
-		{ name: '单下', positions: '1-4-6', points: 2, description: 'One finishes 1st' },
-		{ name: '单下', positions: '1-5-6', points: 2, description: 'One finishes 1st' },
-		{ name: '单上', positions: '2-3-4', points: 1, description: 'None finish 1st' },
-		{ name: '单上', positions: '2-3-5', points: 1, description: 'None finish 1st' },
-		{ name: '单上', positions: '2-3-6', points: 1, description: 'None finish 1st' },
-		{ name: '单上', positions: '2-4-5', points: 1, description: 'None finish 1st' },
-		{ name: '单上', positions: '2-4-6', points: 1, description: 'None finish 1st' },
-		{ name: '单上', positions: '2-5-6', points: 1, description: 'None finish 1st' }
+		{ nameZh: '三下', nameEn: 'Triple Down', positions: '1-2-3', points: 4, description: 'All three finish 1st, 2nd, 3rd' },
+		{ nameZh: '两下半', nameEn: 'Two Down Half', positions: '1-2-4', points: 3, description: 'Two finish 1st and 2nd' },
+		{ nameZh: '两下半', nameEn: 'Two Down Half', positions: '1-2-5', points: 3, description: 'Two finish 1st and 2nd' },
+		{ nameZh: '两下半', nameEn: 'Two Down Half', positions: '1-2-6', points: 3, description: 'Two finish 1st and 2nd' },
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-3-4', points: 2, description: 'One finishes 1st' },
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-3-5', points: 2, description: 'One finishes 1st' },
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-3-6', points: 2, description: 'One finishes 1st' },
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-4-5', points: 2, description: 'One finishes 1st' },
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-4-6', points: 2, description: 'One finishes 1st' },
+		{ nameZh: '单下', nameEn: 'Single Down', positions: '1-5-6', points: 2, description: 'One finishes 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-4', points: 1, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-5', points: 1, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-3-6', points: 1, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-4-5', points: 1, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-4-6', points: 1, description: 'None finish 1st' },
+		{ nameZh: '单上', nameEn: 'Single Up', positions: '2-5-6', points: 1, description: 'None finish 1st' }
 	];
+
+	function getComboName(combo: { nameZh: string; nameEn: string }) {
+		return language === 'en' ? combo.nameEn : combo.nameZh;
+	}
 
 	function getCurrentCombos() {
 		return gameMode === '2v2' ? combos2v2 : combos3v3;
@@ -102,18 +109,20 @@
 		selectedWinner = team;
 	}
 
-	function checkWinCondition(combo: { name: string; positions: string; points: number }) {
+	function checkWinCondition(combo: { nameZh: string; nameEn: string; positions: string; points: number }) {
 		// Win condition: be on level A (14) AND win with no dweller
 		// No dweller means:
-		// - 2v2: positions must be "1-2" (双下)
-		// - 3v3: positions must be "1-2-3" (三下)
+		// - 2v2: no player finished in 4th place
+		// - 3v3: no player finished in 6th place
 		
 		const isOnAce = (selectedWinner === 1 && team1Level === 14) || (selectedWinner === 2 && team2Level === 14);
 		
 		if (!isOnAce) return false;
 		
-		const noDweller = (gameMode === '2v2' && combo.positions === '1-2') || 
-		                   (gameMode === '3v3' && combo.positions === '1-2-3');
+		// Check if any player on winning team finished last
+		const positions = combo.positions.split('-').map(Number);
+		const lastPlace = gameMode === '2v2' ? 4 : 6;
+		const noDweller = !positions.includes(lastPlace);
 		
 		if (noDweller) {
 			gameWinner = selectedWinner === 1 ? team1Name : team2Name;
@@ -125,11 +134,12 @@
 		return false;
 	}
 
-	function scoreGame(combo: { name: string; positions: string; points: number }) {
+	function scoreGame(combo: { nameZh: string; nameEn: string; positions: string; points: number }) {
 		if (selectedWinner === null) return;
 
 		const winnerName = selectedWinner === 1 ? team1Name : team2Name;
 		const points = combo.points;
+		const comboName = getComboName(combo);
 
 		// Check for win condition BEFORE updating levels
 		// (team must be on A and win with no dweller)
@@ -139,7 +149,7 @@
 		roundHistory.push({
 			round: roundNumber,
 			winner: winnerName,
-			combo: `${combo.name} (${combo.positions})`,
+			combo: `${comboName} (${combo.positions})`,
 			points: points,
 			team1Level: team1Level,
 			team2Level: team2Level
@@ -196,11 +206,14 @@
 	}
 </script>
 
-<div class="container">
+<div class="container" class:dark-mode={darkMode}>
 	{#if currentScreen === 'mode-select'}
 		<!-- Mode Selection Screen -->
 		<div class="screen-content mode-select-screen">
-			<h1>🎴 Guandan Scorer</h1>
+			<div class="mode-header">
+				<button class="options-btn settings-btn-initial" onclick={() => (showOptions = !showOptions)}>⚙️</button>
+				<h1>🎴 Guandan Scorer</h1>
+			</div>
 			<div class="mode-cards">
 				<button class="mode-card" onclick={() => selectMode('2v2')}>
 					<div class="mode-icon">👥</div>
@@ -342,7 +355,10 @@
 		<div class="screen-content game-screen">
 			<header>
 				<h1>🎴 Guandan Scorer</h1>
-				<button class="edit-btn" onclick={backToSetup}>✏️ Edit Teams</button>
+				<div class="header-buttons">
+					<button class="options-btn" onclick={() => (showOptions = !showOptions)}>⚙️</button>
+					<button class="edit-btn" onclick={backToSetup}>✏️ Edit Teams</button>
+				</div>
 			</header>
 
 			<div class="teams-container">
@@ -453,7 +469,7 @@
 									<tbody>
 										{#each combos2v2 as combo}
 											<tr>
-												<td>{combo.name}</td>
+												<td>{getComboName(combo)}</td>
 												<td>{combo.positions}</td>
 												<td>+{combo.points}</td>
 											</tr>
@@ -473,7 +489,7 @@
 									<tbody>
 										{#each combos3v3 as combo}
 											<tr>
-												<td>{combo.name}</td>
+												<td>{getComboName(combo)}</td>
 												<td>{combo.positions}</td>
 												<td>+{combo.points}</td>
 											</tr>
@@ -510,7 +526,7 @@
 								<div class="combo-grid">
 									{#each getCurrentCombos() as combo}
 										<button class="combo-btn" onclick={() => scoreGame(combo)}>
-											<span class="combo-name">{combo.name}</span>
+											<span class="combo-name">{getComboName(combo)}</span>
 											<span class="combo-positions">{combo.positions}</span>
 											<span class="combo-points">+{combo.points}</span>
 										</button>
@@ -522,9 +538,61 @@
 					</div>
 				</div>
 			{/if}
+
+			<!-- Options Modal -->
+			{#if showOptions}
+				<div class="info-modal-overlay" onclick={() => (showOptions = false)} onkeydown={(e) => e.key === 'Escape' && (showOptions = false)} role="button" tabindex="0">
+					<div class="info-modal options-modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+						<div class="info-header">
+							<h3>⚙️ Options</h3>
+							<button class="close-btn" onclick={() => (showOptions = false)}>✕</button>
+						</div>
+						<div class="info-content options-content">
+							<div class="option-group">
+								<label class="option-label">
+									<span class="option-text">Theme</span>
+									<div class="toggle-group">
+										<button 
+											class="toggle-btn {darkMode ? '' : 'active'}"
+											onclick={() => (darkMode = false)}
+										>☀️ Light</button>
+										<button 
+											class="toggle-btn {darkMode ? 'active' : ''}"
+											onclick={() => (darkMode = true)}
+										>🌙 Dark</button>
+									</div>
+								</label>
+							</div>
+							<div class="option-group">
+								<label class="option-label">
+									<span class="option-text">Language</span>
+									<div class="toggle-group">
+										<button 
+											class="toggle-btn {language === 'en' ? 'active' : ''}"
+											onclick={() => (language = 'en')}
+										>🇬🇧 English</button>
+										<button 
+											class="toggle-btn {language === 'zh' ? 'active' : ''}"
+											onclick={() => (language = 'zh')}
+										>🇨🇳 中文</button>
+									</div>
+								</label>
+							</div>
+						</div>
+					</div>
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>
+
+<svelte:head>
+	{#if darkMode}
+		<style>
+			body { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important; }
+		</style>
+	{/if}
+</svelte:head>
 
 <style>
 	:global(body) {
@@ -534,6 +602,7 @@
 			Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
 		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 		min-height: 100vh;
+		transition: background 0.3s ease;
 	}
 
 	.container {
@@ -567,10 +636,28 @@
 		min-height: 80vh;
 	}
 
+	.mode-header {
+		position: relative;
+		width: 100%;
+		max-width: 700px;
+		margin-bottom: 3rem;
+	}
+
+	.mode-header h1 {
+		margin: 0;
+		text-align: center;
+	}
+
+	.settings-btn-initial {
+		position: absolute;
+		top: 0;
+		right: 0;
+	}
+
 	.mode-select-screen h1 {
 		color: white;
-		font-size: 4rem;
-		margin: 0 0 3rem 0;
+		font-size: 3.5rem;
+		margin: 0;
 		text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 		text-align: center;
 	}
@@ -903,6 +990,34 @@
 		font-size: 2.5rem;
 		margin: 0;
 		text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+	}
+
+	.header-buttons {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+
+	.options-btn {
+		padding: 0.75rem 1rem;
+		font-size: 1.2rem;
+		border: 2px solid white;
+		background: rgba(255, 255, 255, 0.2);
+		color: white;
+		border-radius: 50%;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		backdrop-filter: blur(10px);
+		width: 48px;
+		height: 48px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.options-btn:hover {
+		background: rgba(255, 255, 255, 0.3);
+		transform: rotate(90deg);
 	}
 
 	.edit-btn {
@@ -1358,6 +1473,65 @@
 		overflow-y: auto;
 	}
 
+	.options-modal {
+		max-width: 500px;
+	}
+
+	.options-content {
+		padding: 2rem;
+	}
+
+	.option-group {
+		margin-bottom: 2rem;
+	}
+
+	.option-group:last-child {
+		margin-bottom: 0;
+	}
+
+	.option-label {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.option-text {
+		font-size: 1.2rem;
+		font-weight: bold;
+		color: #333;
+	}
+
+	.toggle-group {
+		display: flex;
+		gap: 0.5rem;
+		background: #f0f0f0;
+		padding: 0.3rem;
+		border-radius: 25px;
+	}
+
+	.toggle-btn {
+		flex: 1;
+		padding: 0.75rem 1.5rem;
+		font-size: 1rem;
+		font-weight: 600;
+		border: none;
+		border-radius: 20px;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		background: transparent;
+		color: #666;
+	}
+
+	.toggle-btn.active {
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: white;
+		box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+	}
+
+	.toggle-btn:hover:not(.active) {
+		background: rgba(102, 126, 234, 0.1);
+	}
+
 	.info-content h4 {
 		margin: 0 0 1.5rem 0;
 		color: #667eea;
@@ -1414,6 +1588,135 @@
 		transform: rotate(90deg);
 	}
 
+	/* Dark Mode Styles */
+	.dark-mode .mode-card,
+	.dark-mode .team-card,
+	.dark-mode .setup-team,
+	.dark-mode .winner-card,
+	.dark-mode .history-panel,
+	.dark-mode .info-modal,
+	.dark-mode .scoring-modal,
+	.dark-mode .options-modal {
+		background: #1e1e2e;
+		color: #e0e0e0;
+	}
+
+	.dark-mode .mode-card h2 {
+		color: #8b9aff;
+	}
+
+	.dark-mode .mode-card p,
+	.dark-mode .subtitle {
+		color: #b0b0b0;
+	}
+
+	.dark-mode .team-name-input,
+	.dark-mode .setup-players input {
+		background: #2a2a3e;
+		border-color: #3a3a4e;
+		color: #e0e0e0;
+	}
+
+	.dark-mode .team-name-input::placeholder,
+	.dark-mode .setup-players input::placeholder {
+		color: #808080;
+	}
+
+	.dark-mode .team-name-input:focus,
+	.dark-mode .setup-players input:focus {
+		border-color: #8b9aff;
+		background: #333348;
+	}
+
+	.dark-mode h1,
+	.dark-mode h2,
+	.dark-mode h3,
+	.dark-mode h4 {
+		color: #e0e0e0;
+	}
+
+	.dark-mode .team-header h2,
+	.dark-mode .winner-card h1,
+	.dark-mode .winner-card h2 {
+		color: #e0e0e0;
+	}
+
+	.dark-mode .level-label,
+	.dark-mode .level-number {
+		color: #b0b0b0;
+	}
+
+	.dark-mode .player span {
+		color: #e0e0e0;
+	}
+
+	.dark-mode .history-table thead,
+	.dark-mode .info-table thead,
+	.dark-mode .summary-table thead {
+		background: linear-gradient(135deg, #4a5a9a 0%, #5a4a8a 100%);
+	}
+
+	.dark-mode .history-table tbody tr,
+	.dark-mode .info-table tbody tr,
+	.dark-mode .summary-table tbody tr {
+		background: #1e1e2e;
+	}
+
+	.dark-mode .history-table tbody tr:hover,
+	.dark-mode .info-table tbody tr:hover,
+	.dark-mode .summary-table tbody tr:hover {
+		background: #2a2a3e;
+	}
+
+	.dark-mode .history-table td,
+	.dark-mode .info-table td {
+		color: #e0e0e0;
+		border-bottom-color: #3a3a4e;
+	}
+
+	.dark-mode .info-header {
+		background: linear-gradient(135deg, rgba(74, 90, 154, 0.3) 0%, rgba(90, 74, 138, 0.3) 100%);
+	}
+
+	.dark-mode .info-header h3,
+	.dark-mode .history-header h3,
+	.dark-mode .game-summary h3 {
+		color: #e0e0e0;
+	}
+
+	.dark-mode .close-btn {
+		background: rgba(255, 255, 255, 0.1);
+		color: #e0e0e0;
+	}
+
+	.dark-mode .close-btn:hover {
+		background: rgba(255, 255, 255, 0.2);
+	}
+
+	.dark-mode .option-text {
+		color: #e0e0e0;
+	}
+
+	.dark-mode .toggle-group {
+		background: #2a2a3e;
+	}
+
+	.dark-mode .toggle-btn {
+		color: #b0b0b0;
+	}
+
+	.dark-mode .winner-stats {
+		background: linear-gradient(135deg, rgba(74, 90, 154, 0.2) 0%, rgba(90, 74, 138, 0.2) 100%);
+	}
+
+	.dark-mode .stat-label {
+		color: #b0b0b0;
+	}
+
+	.dark-mode .stat-value {
+		color: #8b9aff;
+	}
+
 	@media (max-width: 768px) {
 		.container {
 			padding: 1rem;
@@ -1421,6 +1724,37 @@
 
 		h1 {
 			font-size: 2rem;
+		}
+
+		.mode-select-screen {
+			min-height: 100vh;
+			padding: 1rem 0;
+		}
+
+		.mode-select-screen h1 {
+			font-size: 2.5rem;
+		}
+
+		.mode-header {
+			margin-bottom: 2rem;
+			max-width: 100%;
+			padding: 0 1rem;
+		}
+
+		.mode-card {
+			padding: 2rem 1.5rem;
+		}
+
+		.mode-icon {
+			font-size: 3rem;
+		}
+
+		.mode-card h2 {
+			font-size: 2rem;
+		}
+
+		.mode-card p {
+			font-size: 1rem;
 		}
 
 		.teams-container {
