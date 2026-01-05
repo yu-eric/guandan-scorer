@@ -335,9 +335,54 @@
 		return chosen.size === totalPlayers;
 	}
 
+	function teamHasLockedTopPlaces(teamPlaces: string[], topCount: number): boolean {
+		if (teamPlaces.length !== topCount) return false;
+		if (teamPlaces.some((v) => !v)) return false;
+		const chosen = new Set(teamPlaces);
+		if (chosen.size !== topCount) return false;
+		for (let i = 1; i <= topCount; i++) {
+			if (!chosen.has(String(i))) return false;
+		}
+		return true;
+	}
+
+	function getLockedTopTeam(): TeamId | null {
+		const topCount = team1Players.length;
+		if (teamHasLockedTopPlaces(roundPlacesTeam1, topCount)) return 1;
+		if (teamHasLockedTopPlaces(roundPlacesTeam2, topCount)) return 2;
+		return null;
+	}
+
+	function getUndecidedAveragePlace(): number {
+		// If the winning team takes the top spots (1..teamSize), the remaining spots are
+		// undecidable for the other team; represent them as the mean of the remaining places.
+		const topCount = team1Players.length;
+		const lastPlace = getRoundPlacesCount();
+		const firstUndecided = topCount + 1;
+		return (firstUndecided + lastPlace) / 2;
+	}
+
+	function isRoundPlacesScorable(): boolean {
+		return isRoundPlacesCompleteAndUnique() || getLockedTopTeam() !== null;
+	}
+
 	function parseRoundPlaces(): { team1: number[]; team2: number[] } | null {
 		if (!isRoundPlacesCompleteAndUnique()) return null;
 		const team1 = roundPlacesTeam1.map((v) => Number(v));
+		const team2 = roundPlacesTeam2.map((v) => Number(v));
+		return { team1, team2 };
+	}
+
+	function parseRoundPlacesForScoring(): { team1: number[]; team2: number[] } | null {
+		const lockedTopTeam = getLockedTopTeam();
+		if (lockedTopTeam === null) return parseRoundPlaces();
+		const avg = getUndecidedAveragePlace();
+		if (lockedTopTeam === 1) {
+			const team1 = roundPlacesTeam1.map((v) => Number(v));
+			const team2 = Array(team2Players.length).fill(avg);
+			return { team1, team2 };
+		}
+		const team1 = Array(team1Players.length).fill(avg);
 		const team2 = roundPlacesTeam2.map((v) => Number(v));
 		return { team1, team2 };
 	}
@@ -355,6 +400,19 @@
 		next[index] = current === value ? '' : value;
 		roundPlacesTeam2 = next;
 	}
+
+	$effect(() => {
+		// If one team has locked the top spots (Double Down / Triple Down), the remaining
+		// placements for the other team are undecidable; clear and lock them out.
+		const lockedTopTeam = getLockedTopTeam();
+		if (lockedTopTeam === 1) {
+			if (roundPlacesTeam2.some(Boolean)) roundPlacesTeam2 = Array(team2Players.length).fill('');
+			return;
+		}
+		if (lockedTopTeam === 2) {
+			if (roundPlacesTeam1.some(Boolean)) roundPlacesTeam1 = Array(team1Players.length).fill('');
+		}
+	});
 
 	function deriveWinnerAndComboFromPlaces(places: { team1: number[]; team2: number[] }): { winnerTeam: TeamId; combo: Combo } | null {
 		const team1HasFirst = places.team1.includes(1);
@@ -401,7 +459,7 @@
 	}
 
 	function scoreRoundFromPlaces() {
-		const places = parseRoundPlaces();
+		const places = parseRoundPlacesForScoring();
 		if (!places) return;
 		const derived = deriveWinnerAndComboFromPlaces(places);
 		if (!derived) return;
@@ -915,7 +973,7 @@
 					</div>
 				{/if}
 
-				<button class="new-game-btn" onclick={requestResetGame}>🎴 New Game</button>
+				<button class="new-game-btn" onclick={resetGame}>🎴 New Game</button>
 			</div>
 		</div>
 	{:else}
@@ -953,9 +1011,13 @@
 						</div>
 					</div>
 					<div class="players">
-						{#each team1Players as player}
+						{#each team1Players as player, i}
+							{@const avg = getPlayerAveragePlace(`t1-${i}`)}
 							<div class="player">
-								<span>👤 {player}</span>
+								<span>
+									👤 {player}
+									<span class="player-avg">{Number.isFinite(avg) ? avg.toFixed(2) : '—'}</span>
+								</span>
 							</div>
 						{/each}
 					</div>
@@ -972,9 +1034,13 @@
 						</div>
 					</div>
 					<div class="players">
-						{#each team2Players as player}
+						{#each team2Players as player, i}
+							{@const avg = getPlayerAveragePlace(`t2-${i}`)}
 							<div class="player">
-								<span>👤 {player}</span>
+								<span>
+									👤 {player}
+									<span class="player-avg">{Number.isFinite(avg) ? avg.toFixed(2) : '—'}</span>
+								</span>
 							</div>
 						{/each}
 					</div>
@@ -1026,6 +1092,7 @@
 
 			<!-- Scoring Modal -->
 			{#if showScoring}
+				{@const lockedTopTeam = getLockedTopTeam()}
 				<div class="info-modal-overlay" onclick={() => (showScoring = false)} onkeydown={(e) => e.key === 'Escape' && (showScoring = false)} role="button" tabindex="0">
 					<div class="info-modal scoring-modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
 						<div class="info-header">
@@ -1046,14 +1113,15 @@
 													{@const rowSelected = roundPlacesTeam1[i] !== ''}
 													{@const lockedOut = rowSelected && roundPlacesTeam1[i] !== value}
 													{@const takenByOther = chosen.has(value) && roundPlacesTeam1[i] !== value}
+													{@const forcedByLock = lockedTopTeam !== null && lockedTopTeam !== 1}
 													<button
 														type="button"
 														class="place-btn"
 														class:selected={roundPlacesTeam1[i] === value}
-														class:covered={takenByOther || lockedOut}
-														disabled={takenByOther || lockedOut}
+														class:covered={takenByOther || lockedOut || forcedByLock}
+														disabled={takenByOther || lockedOut || forcedByLock}
 														onclick={() => togglePlayerPlace(1, i, value)}
-														aria-label={takenByOther ? 'Taken' : lockedOut ? 'Locked' : `Place ${value}`}
+														aria-label={forcedByLock ? 'Undecided' : takenByOther ? 'Taken' : lockedOut ? 'Locked' : `Place ${value}`}
 													>
 														{value}
 													</button>
@@ -1075,14 +1143,15 @@
 													{@const rowSelected = roundPlacesTeam2[i] !== ''}
 													{@const lockedOut = rowSelected && roundPlacesTeam2[i] !== value}
 													{@const takenByOther = chosen.has(value) && roundPlacesTeam2[i] !== value}
+													{@const forcedByLock = lockedTopTeam !== null && lockedTopTeam !== 2}
 													<button
 														type="button"
 														class="place-btn"
 														class:selected={roundPlacesTeam2[i] === value}
-														class:covered={takenByOther || lockedOut}
-														disabled={takenByOther || lockedOut}
+														class:covered={takenByOther || lockedOut || forcedByLock}
+														disabled={takenByOther || lockedOut || forcedByLock}
 														onclick={() => togglePlayerPlace(2, i, value)}
-														aria-label={takenByOther ? 'Taken' : lockedOut ? 'Locked' : `Place ${value}`}
+														aria-label={forcedByLock ? 'Undecided' : takenByOther ? 'Taken' : lockedOut ? 'Locked' : `Place ${value}`}
 													>
 														{value}
 													</button>
@@ -1094,7 +1163,7 @@
 							</div>
 
 							<div class="scoring-actions">
-								<button class="start-btn" disabled={!isRoundPlacesCompleteAndUnique()} onclick={scoreRoundFromPlaces}>
+								<button class="start-btn" disabled={!isRoundPlacesScorable()} onclick={scoreRoundFromPlaces}>
 									Score Round
 								</button>
 								<button class="cancel-btn" onclick={cancelScoring}>Cancel</button>
@@ -1697,6 +1766,13 @@
 		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
 	}
 
+	.team-card.trump-team:hover {
+		box-shadow:
+			0 0 0 2px rgba(255, 215, 0, 0.7),
+			0 0 18px rgba(255, 215, 0, 0.55),
+			0 0 42px rgba(255, 215, 0, 0.35);
+	}
+
 	.team1 {
 		border-top: 5px solid #f093fb;
 	}
@@ -1761,7 +1837,16 @@
 	.player span {
 		color: #333;
 		font-weight: 500;
-		display: block;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+
+	.player-avg {
+		font-weight: 600;
+		color: #666;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.actions {
