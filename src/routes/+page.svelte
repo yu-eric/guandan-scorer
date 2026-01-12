@@ -595,6 +595,24 @@
 		'#a78bfa'
 	];
 
+	const teamGraphColors = {
+		1: playerColors[0],
+		2: playerColors[1]
+	} as const;
+
+	function getTeamLevelsOverGame(team: TeamId): number[] {
+		if (roundHistory.length === 0) return [];
+		// roundHistory stores PRE-round state. To plot the score after each round,
+		// use the next round's pre-state, and end with the current level.
+		const levels: number[] = [];
+		for (let i = 0; i < roundHistory.length - 1; i++) {
+			const next = roundHistory[i + 1];
+			levels.push(team === 1 ? next.team1Level : next.team2Level);
+		}
+		levels.push(team === 1 ? team1Level : team2Level);
+		return levels;
+	}
+
 	function getAllPlayers(): Array<{ key: string; name: string; team: TeamId; color: string }> {
 		const team1 = team1Players.map((name, index) => ({ key: `t1-${index}`, name, team: 1 as const }));
 		const team2 = team2Players.map((name, index) => ({ key: `t2-${index}`, name, team: 2 as const }));
@@ -657,7 +675,7 @@
 			});
 			const res = await fetch(dataUrl);
 			const blob = await res.blob();
-			const file = new File([blob], `guandan-placements-${new Date().toISOString().slice(0, 10)}.png`, {
+			const file = new File([blob], `guandan-team-score-${new Date().toISOString().slice(0, 10)}.png`, {
 				type: 'image/png'
 			});
 
@@ -680,7 +698,7 @@
 			// instead of falling back to an <a download> flow that triggers a download prompt.
 			if (isIOS() && nav.share) {
 				if (nav.canShare?.({ files: [file] })) {
-					await nav.share({ title: shareTitle, text: 'Player placements over rounds', files: [file] });
+					await nav.share({ title: shareTitle, text: 'Team score (level) over rounds', files: [file] });
 					return;
 				}
 				await nav.share({ title: shareTitle, text: shareText, url: shareUrl });
@@ -690,8 +708,8 @@
 			// Mobile: prefer the native share sheet.
 			if (isProbablyMobile() && nav.share && nav.canShare?.({ files: [file] })) {
 				await nav.share({
-					title: 'Guandan placements',
-					text: 'Player placements over rounds',
+					title: 'Guandan team score',
+					text: 'Team score (level) over rounds',
 					files: [file]
 				});
 				return;
@@ -718,8 +736,8 @@
 			// Otherwise, if share is available (some desktops), use it.
 			if (nav.share && nav.canShare?.({ files: [file] })) {
 				await nav.share({
-					title: 'Guandan placements',
-					text: 'Player placements over rounds',
+						title: 'Guandan team score',
+						text: 'Team score (level) over rounds',
 					files: [file]
 				});
 				return;
@@ -878,7 +896,7 @@
 					</div>
 
 					<div class="game-summary">
-						<h3>Player Placements</h3>
+						<h3>Team Score</h3>
 						<div class="placements-actions">
 							<button class="share-btn" onclick={shareOrDownloadGraphImage} disabled={isExportingGraph}>
 								{isExportingGraph ? 'Preparing…' : 'Share / Download Graph'}
@@ -888,12 +906,11 @@
 							{/if}
 						</div>
 						<div class="placements-graph" bind:this={graphEl}>
-							<svg viewBox="0 0 760 320" role="img" aria-label="Player placements by round">
+							<svg viewBox="0 0 760 320" role="img" aria-label="Team score (level) by round">
 								{#if roundHistory.length === 1}
 									<text x="380" y="160" text-anchor="middle" fill="#666" font-size="16">Add more rounds to see trends</text>
 								{:else}
 									{@const rounds = roundHistory.length}
-									{@const placesCount = getRoundPlacesCount()}
 									{@const padL = 60}
 									{@const padR = 20}
 									{@const padT = 20}
@@ -902,27 +919,55 @@
 									{@const h = 320}
 									{@const plotW = w - padL - padR}
 									{@const plotH = h - padT - padB}
+									{@const minLevel = 2}
+									{@const maxLevel = 14}
 									<rect x={padL} y={padT} width={plotW} height={plotH} fill="#fff" opacity="0.0" />
-									{#each Array(placesCount) as _, i}
-										{@const place = i + 1}
-										{@const y = padT + (place - 1) * (plotH / (placesCount - 1))}
+
+									{#each [2, 4, 6, 8, 10, 12, 14] as lvl}
+										{@const y = padT + ((maxLevel - lvl) * plotH) / (maxLevel - minLevel)}
 										<line x1={padL} y1={y} x2={w - padR} y2={y} stroke="rgba(0,0,0,0.08)" />
-										<text x={padL - 10} y={y + 4} text-anchor="end" fill="#666" font-size="12">{place}</text>
+										<text x={padL - 10} y={y + 4} text-anchor="end" fill="#666" font-size="12">{getLevelCard(lvl)}</text>
 									{/each}
 
-									{#each getAllPlayers() as player}
-										{@const values = getPlayerPlacesOverGame(player.key)}
-										{@const points = values
-											.map((place, idx) => {
-												const x = padL + (idx * plotW) / (rounds - 1);
-												const y = padT + (place - 1) * (plotH / (placesCount - 1));
-												return `${x},${y}`;
-											})
-											.join(' ')}
-										<polyline points={points} fill="none" stroke={player.color} stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
-											<title>{player.name}</title>
-										</polyline>
-									{/each}
+									{@const team1Values = getTeamLevelsOverGame(1)}
+									{@const team2Values = getTeamLevelsOverGame(2)}
+									{@const team1Points = team1Values
+										.map((lvl, idx) => {
+											const x = padL + (idx * plotW) / (rounds - 1);
+											const y = padT + ((maxLevel - lvl) * plotH) / (maxLevel - minLevel);
+											return `${x},${y}`;
+										})
+										.join(' ')}
+									{@const team2Points = team2Values
+										.map((lvl, idx) => {
+											const x = padL + (idx * plotW) / (rounds - 1);
+											const y = padT + ((maxLevel - lvl) * plotH) / (maxLevel - minLevel);
+											return `${x},${y}`;
+										})
+										.join(' ')}
+
+									<polyline
+										points={team1Points}
+										fill="none"
+										stroke={teamGraphColors[1]}
+										stroke-width="3"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										opacity="0.9"
+									>
+										<title>{team1Name}</title>
+									</polyline>
+									<polyline
+										points={team2Points}
+										fill="none"
+										stroke={teamGraphColors[2]}
+										stroke-width="3"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										opacity="0.9"
+									>
+										<title>{team2Name}</title>
+									</polyline>
 
 									{#each Array(rounds) as _, i}
 										{@const x = padL + (i * plotW) / (rounds - 1)}
@@ -931,46 +976,48 @@
 								{/if}
 							</svg>
 							<div class="placements-legend">
-								{#each getAllPlayers() as player}
-									<div class="legend-item">
-										<svg class="legend-line" viewBox="0 0 40 8" aria-hidden="true">
-											<line
-												x1="2"
-												y1="4"
-												x2="38"
-												y2="4"
-												stroke={player.color}
-												stroke-width="3"
-												stroke-linecap="round"
-											/>
-										</svg>
-										<span class="legend-name">{player.name}</span>
-									</div>
-								{/each}
+								<div class="legend-item">
+									<svg class="legend-line" viewBox="0 0 40 8" aria-hidden="true">
+										<line x1="2" y1="4" x2="38" y2="4" stroke={teamGraphColors[1]} stroke-width="3" stroke-linecap="round" />
+									</svg>
+									<span class="legend-name">{team1Name}</span>
+								</div>
+								<div class="legend-item">
+									<svg class="legend-line" viewBox="0 0 40 8" aria-hidden="true">
+										<line x1="2" y1="4" x2="38" y2="4" stroke={teamGraphColors[2]} stroke-width="3" stroke-linecap="round" />
+									</svg>
+									<span class="legend-name">{team2Name}</span>
+								</div>
 							</div>
 						</div>
-
-						<div class="summary-table">
-							<table>
-								<thead>
-									<tr>
-										<th>Player</th>
-										<th>Team</th>
-										<th>Avg Place</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each getPlayerAverageRows() as row}
-										<tr>
-											<td>{row.name}</td>
-											<td>{row.team === 1 ? team1Name : team2Name}</td>
-											<td>{row.avg.toFixed(2)}</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
 					</div>
+
+					{@const avgRows = getPlayerAverageRows()}
+					{#if avgRows.length > 0}
+						<div class="game-summary">
+							<h3>Player Average Position</h3>
+							<div class="summary-table">
+								<table>
+									<thead>
+										<tr>
+											<th>Player</th>
+											<th>Team</th>
+											<th>Avg Place</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each avgRows as row}
+											<tr>
+												<td>{row.name}</td>
+												<td>{row.team === 1 ? team1Name : team2Name}</td>
+												<td>{row.avg.toFixed(2)}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						</div>
+					{/if}
 				{/if}
 
 				<button class="new-game-btn" onclick={resetGame}>🎴 New Game</button>
