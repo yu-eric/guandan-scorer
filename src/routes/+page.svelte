@@ -39,6 +39,7 @@
 	let darkMode = $state(false);
 	let language = $state<'en' | 'zh'>('en');
 	let trumpTeam = $state<TrumpTeam>(null);
+	let initialTrumpTeam = $state<TrumpTeam>(null);
 	let aceChallengeTeam = $state<TeamId | null>(null);
 	let aceChallengeRemaining = $state(0);
 	let roundPlacesTeam1 = $state<string[]>(['', '']);
@@ -47,8 +48,25 @@
 	let isExportingGraph = $state(false);
 	let exportError = $state('');
 	let showResetConfirm = $state(false);
+	let endCardLevel = $state(14);
+	let switchCostsPoint = $state(true);
 
 	const STORAGE_KEY = 'guandan-scorer-state-v1';
+	const MIN_LEVEL = 2;
+	const MAX_LEVEL = 14;
+	const STANDING_LOSS_POSITIONS = '1-4';
+
+	function clampEndCardLevel(value: unknown): number {
+		const num = Math.round(Number(value));
+		if (!Number.isFinite(num)) return MAX_LEVEL;
+		return Math.min(Math.max(num, MIN_LEVEL), MAX_LEVEL);
+	}
+
+	function clampLevelToEndCard(value: unknown, endLevel: number): number {
+		const num = Math.round(Number(value));
+		if (!Number.isFinite(num)) return MIN_LEVEL;
+		return Math.min(Math.max(num, MIN_LEVEL), endLevel);
+	}
 
 	type PersistedState = {
 		currentScreen: Screen;
@@ -67,10 +85,13 @@
 		darkMode: boolean;
 		language: 'en' | 'zh';
 		trumpTeam: TrumpTeam;
+		initialTrumpTeam: TrumpTeam;
 		aceChallengeTeam: TeamId | null;
 		aceChallengeRemaining: number;
 		roundPlacesTeam1: string[];
 		roundPlacesTeam2: string[];
+		endCardLevel: number;
+		switchCostsPoint: boolean;
 	};
 
 	const defaultPlayers: Record<GameMode, Record<TeamId, string[]>> = {
@@ -169,10 +190,13 @@
 			darkMode,
 			language,
 			trumpTeam,
+			initialTrumpTeam,
 			aceChallengeTeam,
 			aceChallengeRemaining,
 			roundPlacesTeam1: [...roundPlacesTeam1],
-			roundPlacesTeam2: [...roundPlacesTeam2]
+			roundPlacesTeam2: [...roundPlacesTeam2],
+			endCardLevel,
+			switchCostsPoint
 		};
 	}
 
@@ -200,9 +224,14 @@
 		team2Name = typeof state?.team2Name === 'string' && state.team2Name ? state.team2Name : 'Team 2';
 		team1Players = normalizePlayers(state?.team1Players, storedMode, 1);
 		team2Players = normalizePlayers(state?.team2Players, storedMode, 2);
-		team1Level = Number.isFinite(state?.team1Level) ? state.team1Level : 2;
-		team2Level = Number.isFinite(state?.team2Level) ? state.team2Level : 2;
-		roundHistory = normalizeHistory(state?.roundHistory);
+		endCardLevel = clampEndCardLevel(state?.endCardLevel);
+		team1Level = clampLevelToEndCard(Number.isFinite(state?.team1Level) ? state.team1Level : 2, endCardLevel);
+		team2Level = clampLevelToEndCard(Number.isFinite(state?.team2Level) ? state.team2Level : 2, endCardLevel);
+		roundHistory = normalizeHistory(state?.roundHistory).map((round) => ({
+			...round,
+			team1Level: clampLevelToEndCard(round.team1Level, endCardLevel),
+			team2Level: clampLevelToEndCard(round.team2Level, endCardLevel)
+		}));
 		roundNumber = Number.isFinite(state?.roundNumber) && state.roundNumber > 0 ? state.roundNumber : 1;
 		isInitialSetup = Boolean(state?.isInitialSetup);
 		gameWinner = typeof state?.gameWinner === 'string' ? state.gameWinner : '';
@@ -210,10 +239,22 @@
 		darkMode = Boolean(state?.darkMode);
 		language = state?.language === 'zh' ? 'zh' : 'en';
 		trumpTeam = state?.trumpTeam === 1 || state?.trumpTeam === 2 ? state.trumpTeam : null;
+		initialTrumpTeam = state?.initialTrumpTeam === 1 || state?.initialTrumpTeam === 2 ? state.initialTrumpTeam : null;
 		aceChallengeTeam = state?.aceChallengeTeam === 1 || state?.aceChallengeTeam === 2 ? state.aceChallengeTeam : null;
 		aceChallengeRemaining = Number.isFinite(state?.aceChallengeRemaining) ? state.aceChallengeRemaining : 0;
 		roundPlacesTeam1 = normalizeRoundPlaces(state?.roundPlacesTeam1, team1Players.length);
 		roundPlacesTeam2 = normalizeRoundPlaces(state?.roundPlacesTeam2, team2Players.length);
+		switchCostsPoint = Boolean(state?.switchCostsPoint ?? true);
+		if (endCardLevel !== MAX_LEVEL) {
+			aceChallengeTeam = null;
+			aceChallengeRemaining = 0;
+		} else if (aceChallengeTeam !== null) {
+			const challengeLevel = aceChallengeTeam === 1 ? team1Level : team2Level;
+			if (challengeLevel < endCardLevel) {
+				aceChallengeTeam = null;
+				aceChallengeRemaining = 0;
+			}
+		}
 		const allowedScreens: Screen[] = ['mode-select', 'team-setup', 'game'];
 		currentScreen = allowedScreens.includes(state?.currentScreen) ? state.currentScreen : 'mode-select';
 	}
@@ -243,9 +284,17 @@
 	const levelCards = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
 	function getLevelCard(level: number): string {
-		if (level < 2) return '2';
-		if (level > 14) return 'A';
-		return levelCards[level - 2];
+		const clamped = Math.min(Math.max(level, MIN_LEVEL), endCardLevel);
+		return levelCards[clamped - MIN_LEVEL];
+	}
+
+	function getLevelTicks(): number[] {
+		const ticks: number[] = [];
+		for (let lvl = MIN_LEVEL; lvl <= endCardLevel; lvl += 2) {
+			ticks.push(lvl);
+		}
+		if (!ticks.includes(endCardLevel)) ticks.push(endCardLevel);
+		return ticks;
 	}
 
 	// Scoring combos for 2v2 mode
@@ -283,22 +332,30 @@
 		return gameMode === '2v2' ? combos2v2 : combos3v3;
 	}
 
+	function getActiveTrumpTeam(): TrumpTeam {
+		return trumpTeam ?? initialTrumpTeam ?? null;
+	}
+
 	function getTrumpLevel(): number {
-		if (trumpTeam === null) return 0;
-		return trumpTeam === 1 ? team1Level : team2Level;
+		const activeTrump = getActiveTrumpTeam();
+		if (activeTrump === null) return 0;
+		return activeTrump === 1 ? team1Level : team2Level;
 	}
 
 	function getTrumpTeamName(): string {
-		if (trumpTeam === null) return language === 'en' ? 'None' : '无';
-		return trumpTeam === 1 ? team1Name : team2Name;
+		const activeTrump = getActiveTrumpTeam();
+		if (activeTrump === null) return language === 'en' ? 'None' : '无';
+		return activeTrump === 1 ? team1Name : team2Name;
 	}
 
-	function getEffectivePoints(combo: { points: number }, winnerTeam: TeamId): number {
-		// Round 1: no trump, no switch-cost.
-		if (trumpTeam === null) return combo.points;
+	function getEffectivePoints(combo: { points: number }, winnerTeam: TeamId, activeTrump: TrumpTeam): number {
+		// Round 1: no trump, no switch-cost unless a team is selected.
+		if (activeTrump === null) return combo.points;
 		// If the non-trump side wins, spend 1 point to switch trump before adding.
-		const switching = winnerTeam !== trumpTeam;
-		return switching ? Math.max(combo.points - 1, 0) : combo.points;
+		const switching = winnerTeam !== activeTrump;
+		if (!switching) return combo.points;
+		if (!switchCostsPoint) return combo.points;
+		return Math.max(combo.points - 1, 0);
 	}
 
 	function isQualifyingAceWin(combo: { positions: string }): boolean {
@@ -364,6 +421,22 @@
 
 	function isRoundPlacesScorable(): boolean {
 		return isRoundPlacesCompleteAndUnique() || getLockedTopTeam() !== null;
+	}
+
+	function setEndCardLevel(value: number) {
+		const clamped = clampEndCardLevel(value);
+		endCardLevel = clamped;
+		team1Level = clampLevelToEndCard(team1Level, clamped);
+		team2Level = clampLevelToEndCard(team2Level, clamped);
+		roundHistory = roundHistory.map((round) => ({
+			...round,
+			team1Level: clampLevelToEndCard(round.team1Level, clamped),
+			team2Level: clampLevelToEndCard(round.team2Level, clamped)
+		}));
+		if (clamped !== MAX_LEVEL) {
+			aceChallengeTeam = null;
+			aceChallengeRemaining = 0;
+		}
 	}
 
 	function parseRoundPlaces(): { team1: number[]; team2: number[] } | null {
@@ -466,13 +539,19 @@
 
 		const { winnerTeam, combo } = derived;
 		const winnerName = winnerTeam === 1 ? team1Name : team2Name;
-		const points = getEffectivePoints(combo, winnerTeam);
+		const activeTrump = getActiveTrumpTeam();
+		const points = getEffectivePoints(combo, winnerTeam, activeTrump);
 		const comboName = getComboName(combo);
-		const challengeWasActiveAtStart = aceChallengeTeam !== null;
+		const challengeWasActiveAtStart = aceChallengeTeam !== null && endCardLevel === MAX_LEVEL;
 		const winnerLevelBefore = winnerTeam === 1 ? team1Level : team2Level;
+		const projectedWinnerLevelAfter = Math.min(winnerLevelBefore + points, endCardLevel);
+		const qualifiesThisRound = isQualifyingAceWin(combo);
 
 		// If a team is already on Ace, they must win a qualifying combo to win the match.
-		const wonGame = winnerLevelBefore === 14 && isQualifyingAceWin(combo);
+		const wonGame =
+			endCardLevel === MAX_LEVEL
+				? winnerLevelBefore === endCardLevel && qualifiesThisRound
+				: projectedWinnerLevelAfter === endCardLevel && qualifiesThisRound;
 
 		// Add to history (store pre-round state for undo)
 		roundHistory.push({
@@ -482,7 +561,7 @@
 			points: points,
 			team1Level: team1Level,
 			team2Level: team2Level,
-			trumpTeam: trumpTeam,
+			trumpTeam: activeTrump,
 			aceChallengeTeam: aceChallengeTeam,
 			aceChallengeRemaining: aceChallengeRemaining,
 			team1Places: places.team1,
@@ -499,35 +578,43 @@
 		}
 
 		// Round 1: establish trump, but don't treat it as a "switch".
-		if (trumpTeam === null) {
-			trumpTeam = winnerTeam;
-		} else if (winnerTeam !== trumpTeam) {
+		let nextTrumpTeam = activeTrump;
+		if (activeTrump === null) {
+			nextTrumpTeam = winnerTeam;
+		} else if (winnerTeam !== activeTrump) {
 			// If the non-trump side wins, switch trump.
-			trumpTeam = winnerTeam;
+			nextTrumpTeam = winnerTeam;
 		}
+		trumpTeam = nextTrumpTeam;
+		initialTrumpTeam = null;
 
 		// Update levels (cap at Ace)
 		if (winnerTeam === 1) {
-			team1Level = Math.min(team1Level + points, 14);
+			team1Level = Math.min(team1Level + points, endCardLevel);
 		} else {
-			team2Level = Math.min(team2Level + points, 14);
+			team2Level = Math.min(team2Level + points, endCardLevel);
 		}
 
 		// If a team just reached Ace this round, start the 3-game countdown.
 		const winnerLevelAfter = winnerTeam === 1 ? team1Level : team2Level;
-		if (winnerLevelBefore < 14 && winnerLevelAfter === 14) {
+		if (endCardLevel === MAX_LEVEL && winnerLevelBefore < endCardLevel && winnerLevelAfter === endCardLevel) {
 			aceChallengeTeam = winnerTeam;
 			aceChallengeRemaining = 3;
 		}
 
 		// If the Ace challenge was already active at the start of this round, decrement.
 		if (challengeWasActiveAtStart && aceChallengeTeam !== null) {
-			aceChallengeRemaining = Math.max(aceChallengeRemaining - 1, 0);
-			if (aceChallengeRemaining === 0) {
-				if (aceChallengeTeam === 1) team1Level = 2;
-				if (aceChallengeTeam === 2) team2Level = 2;
-				aceChallengeTeam = null;
-				aceChallengeRemaining = 0;
+			const aceTeamWon = winnerTeam === aceChallengeTeam;
+			const isStandingLoss = combo.positions === STANDING_LOSS_POSITIONS;
+			// Only count down when the non-ace side wins with a true loss (not a 1-4 standing).
+			if (!aceTeamWon && !isStandingLoss) {
+				aceChallengeRemaining = Math.max(aceChallengeRemaining - 1, 0);
+				if (aceChallengeRemaining === 0) {
+					if (aceChallengeTeam === 1) team1Level = MIN_LEVEL;
+					if (aceChallengeTeam === 2) team2Level = MIN_LEVEL;
+					aceChallengeTeam = null;
+					aceChallengeRemaining = 0;
+				}
 			}
 		}
 
@@ -541,8 +628,8 @@
 	}
 
 	function resetGame() {
-		team1Level = 2;
-		team2Level = 2;
+		team1Level = MIN_LEVEL;
+		team2Level = MIN_LEVEL;
 		team1Name = 'Team 1';
 		team2Name = 'Team 2';
 		team1Players = ['Player 1', 'Player 2'];
@@ -555,6 +642,7 @@
 		gameWinner = '';
 		gameDuration = 0;
 		trumpTeam = null;
+		initialTrumpTeam = null;
 		aceChallengeTeam = null;
 		aceChallengeRemaining = 0;
 		roundPlacesTeam1 = ['', ''];
@@ -919,11 +1007,11 @@
 									{@const h = 320}
 									{@const plotW = w - padL - padR}
 									{@const plotH = h - padT - padB}
-									{@const minLevel = 2}
-									{@const maxLevel = 14}
+									{@const minLevel = MIN_LEVEL}
+									{@const maxLevel = Math.max(endCardLevel, MIN_LEVEL + 1)}
 									<rect x={padL} y={padT} width={plotW} height={plotH} fill="#fff" opacity="0.0" />
 
-									{#each [2, 4, 6, 8, 10, 12, 14] as lvl}
+									{#each getLevelTicks() as lvl}
 										{@const y = padT + ((maxLevel - lvl) * plotH) / (maxLevel - minLevel)}
 										<line x1={padL} y1={y} x2={w - padR} y2={y} stroke="rgba(0,0,0,0.08)" />
 										<text x={padL - 10} y={y + 4} text-anchor="end" fill="#666" font-size="12">{getLevelCard(lvl)}</text>
@@ -1032,7 +1120,7 @@
 					<div class="trump-badge">
 						<span class="trump-label">Trump</span>
 						<span class="trump-team">{getTrumpTeamName()}</span>
-						{#if trumpTeam !== null}
+						{#if getActiveTrumpTeam() !== null}
 							<span class="trump-card">{getLevelCard(getTrumpLevel())}</span>
 							<span class="trump-level">(Lvl {getTrumpLevel()})</span>
 						{:else}
@@ -1048,7 +1136,7 @@
 
 			<div class="teams-container">
 				<!-- Team 1 -->
-				<div class="team-card team1" class:trump-team={trumpTeam === 1}>
+				<div class="team-card team1" class:trump-team={getActiveTrumpTeam() === 1}>
 					<div class="team-header">
 						<h2>{team1Name}</h2>
 						<div class="level-display">
@@ -1071,7 +1159,7 @@
 				</div>
 
 				<!-- Team 2 -->
-				<div class="team-card team2" class:trump-team={trumpTeam === 2}>
+				<div class="team-card team2" class:trump-team={getActiveTrumpTeam() === 2}>
 					<div class="team-header">
 						<h2>{team2Name}</h2>
 						<div class="level-display">
@@ -1147,6 +1235,31 @@
 							<button class="close-btn" onclick={() => (showScoring = false)}>✕</button>
 						</div>
 						<div class="info-content scoring-content">
+							{#if trumpTeam === null}
+								<div class="initial-trump">
+									<h4>Starting Trump Team</h4>
+									<div class="toggle-group">
+										<button
+											class="toggle-btn {initialTrumpTeam === 1 ? 'active' : ''}"
+											onclick={() => (initialTrumpTeam = 1)}
+										>
+											{team1Name}
+										</button>
+										<button
+											class="toggle-btn {initialTrumpTeam === 2 ? 'active' : ''}"
+											onclick={() => (initialTrumpTeam = 2)}
+										>
+											{team2Name}
+										</button>
+										<button
+											class="toggle-btn {!initialTrumpTeam ? 'active' : ''}"
+											onclick={() => (initialTrumpTeam = null)}
+										>
+											None
+										</button>
+									</div>
+								</div>
+							{/if}
 							<div class="placements-grid">
 								<div class="placements-team">
 									<h4>{team1Name}</h4>
@@ -1257,6 +1370,36 @@
 											onclick={() => (language = 'zh')}
 										>🇨🇳 中文</button>
 									</div>
+								</label>
+							</div>
+							<div class="option-group">
+								<label class="option-label">
+									<span class="option-text">Switch costs 1 point</span>
+									<div class="toggle-group">
+										<button 
+											class="toggle-btn {switchCostsPoint ? 'active' : ''}"
+											onclick={() => (switchCostsPoint = true)}
+										>On</button>
+										<button 
+											class="toggle-btn {!switchCostsPoint ? 'active' : ''}"
+											onclick={() => (switchCostsPoint = false)}
+										>Off</button>
+									</div>
+								</label>
+							</div>
+							<div class="option-group">
+								<label class="option-label">
+									<span class="option-text">End Card</span>
+									<select
+										class="option-select"
+										value={endCardLevel}
+										onchange={(e) => setEndCardLevel(Number((e.currentTarget as HTMLSelectElement).value))}
+									>
+										{#each levelCards as label, idx}
+											{@const level = idx + MIN_LEVEL}
+											<option value={level}>{label}</option>
+										{/each}
+									</select>
 								</label>
 							</div>
 						</div>
@@ -2279,6 +2422,10 @@
 		overflow-y: auto;
 	}
 
+	.initial-trump {
+		margin-bottom: 1.5rem;
+	}
+
 	.scoring-actions {
 		display: flex;
 		flex-direction: column;
@@ -2333,6 +2480,14 @@
 		font-size: 1.2rem;
 		font-weight: bold;
 		color: #333;
+	}
+
+	.option-select {
+		padding: 0.75rem 1rem;
+		font-size: 1rem;
+		border-radius: 12px;
+		border: 1px solid #e0e0e0;
+		background: white;
 	}
 
 	.toggle-group {
