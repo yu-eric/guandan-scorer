@@ -604,7 +604,8 @@
 		// If the Ace challenge was already active at the start of this round, decrement.
 		if (challengeWasActiveAtStart && aceChallengeTeam !== null) {
 			const aceTeamWon = winnerTeam === aceChallengeTeam;
-			if (!aceTeamWon) {
+			const isStandingLoss = combo.positions === '1-4';
+			if (!aceTeamWon && !isStandingLoss) {
 				aceChallengeRemaining = Math.max(aceChallengeRemaining - 1, 0);
 				if (aceChallengeRemaining === 0) {
 					if (aceChallengeTeam === 1) team1Level = MIN_LEVEL;
