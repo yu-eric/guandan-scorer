@@ -606,6 +606,7 @@
 		if (challengeWasActiveAtStart && aceChallengeTeam !== null) {
 			const aceTeamWon = winnerTeam === aceChallengeTeam;
 			const isStandingLoss = combo.positions === STANDING_LOSS_POSITIONS;
+			// Only count down when the non-ace side wins with a true loss (not a 1-4 standing).
 			if (!aceTeamWon && !isStandingLoss) {
 				aceChallengeRemaining = Math.max(aceChallengeRemaining - 1, 0);
 				if (aceChallengeRemaining === 0) {
