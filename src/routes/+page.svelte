@@ -54,6 +54,7 @@
 	const STORAGE_KEY = 'guandan-scorer-state-v1';
 	const MIN_LEVEL = 2;
 	const MAX_LEVEL = 14;
+	const STANDING_LOSS_POSITIONS = '1-4';
 
 	function clampEndCardLevel(value: unknown): number {
 		const num = Math.round(Number(value));
@@ -604,7 +605,7 @@
 		// If the Ace challenge was already active at the start of this round, decrement.
 		if (challengeWasActiveAtStart && aceChallengeTeam !== null) {
 			const aceTeamWon = winnerTeam === aceChallengeTeam;
-			const isStandingLoss = combo.positions === '1-4';
+			const isStandingLoss = combo.positions === STANDING_LOSS_POSITIONS;
 			if (!aceTeamWon && !isStandingLoss) {
 				aceChallengeRemaining = Math.max(aceChallengeRemaining - 1, 0);
 				if (aceChallengeRemaining === 0) {
