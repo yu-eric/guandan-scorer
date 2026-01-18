@@ -50,6 +50,8 @@
 	let showResetConfirm = $state(false);
 	let endCardLevel = $state(14);
 	let switchCostsPoint = $state(true);
+	let showPlacementModal = $state(false);
+	let selectedPlacementRound = $state<RoundHistory | null>(null);
 
 	const STORAGE_KEY = 'guandan-scorer-state-v1';
 	const MIN_LEVEL = 2;
@@ -674,6 +676,21 @@
 		roundNumber--;
 	}
 
+	function openPlacementModal(round: RoundHistory) {
+		selectedPlacementRound = round;
+		showPlacementModal = true;
+	}
+
+	function closePlacementModal() {
+		showPlacementModal = false;
+		selectedPlacementRound = null;
+	}
+
+	function formatPlace(value: number | null | undefined): string {
+		if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+		return Number.isInteger(value) ? String(value) : value.toFixed(1);
+	}
+
 	const playerColors = [
 		'#f5576c',
 		'#4facfe',
@@ -1206,6 +1223,7 @@
 									<th>Winner</th>
 									<th>Combo</th>
 									<th>Points</th>
+									<th>Placement</th>
 									<th>Levels After</th>
 								</tr>
 							</thead>
@@ -1216,6 +1234,9 @@
 										<td>{round.winner}</td>
 										<td>{round.combo}</td>
 										<td>+{round.points}</td>
+										<td>
+											<button class="placement-btn" onclick={() => openPlacementModal(round)}>View</button>
+										</td>
 										<td>{getLevelCard(round.team1Level)} / {getLevelCard(round.team2Level)}</td>
 									</tr>
 								{/each}
@@ -1250,12 +1271,6 @@
 											onclick={() => (initialTrumpTeam = 2)}
 										>
 											{team2Name}
-										</button>
-										<button
-											class="toggle-btn {!initialTrumpTeam ? 'active' : ''}"
-											onclick={() => (initialTrumpTeam = null)}
-										>
-											None
 										</button>
 									</div>
 								</div>
@@ -1420,6 +1435,60 @@
 							<div class="confirm-actions">
 								<button class="cancel-btn" onclick={() => (showResetConfirm = false)}>Cancel</button>
 								<button class="start-btn" onclick={confirmResetGame}>Reset</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Placement Details Modal -->
+			{#if showPlacementModal && selectedPlacementRound}
+				<div class="info-modal-overlay" onclick={closePlacementModal} onkeydown={(e) => e.key === 'Escape' && closePlacementModal()} role="button" tabindex="0">
+					<div class="info-modal placements-modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+						<div class="info-header">
+							<h3>Round {selectedPlacementRound.round} Placements</h3>
+							<button class="close-btn" onclick={closePlacementModal}>✕</button>
+						</div>
+						<div class="info-content placements-modal-content">
+							<div class="placements-modal-grid">
+								<div class="placements-modal-team">
+									<h4>{team1Name}</h4>
+									<table>
+										<thead>
+											<tr>
+												<th>Player</th>
+												<th>Place</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each team1Players as player, i}
+												<tr>
+													<td>{player}</td>
+													<td>{formatPlace(selectedPlacementRound.team1Places?.[i])}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+								<div class="placements-modal-team">
+									<h4>{team2Name}</h4>
+									<table>
+										<thead>
+											<tr>
+												<th>Player</th>
+												<th>Place</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each team2Players as player, i}
+												<tr>
+													<td>{player}</td>
+													<td>{formatPlace(selectedPlacementRound.team2Places?.[i])}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -2333,6 +2402,24 @@
 		background: rgba(102, 126, 234, 0.05);
 	}
 
+	.placement-btn {
+		padding: 0.45rem 0.9rem;
+		font-size: 0.9rem;
+		font-weight: 700;
+		border: none;
+		border-radius: 999px;
+		cursor: pointer;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: white;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+		transition: transform 0.2s ease, box-shadow 0.2s ease;
+	}
+
+	.placement-btn:hover {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+	}
+
 	.info-modal-overlay {
 		position: fixed;
 		top: 0;
@@ -2440,6 +2527,54 @@
 
 	.options-modal {
 		max-width: 500px;
+	}
+
+	.placements-modal {
+		max-width: 800px;
+	}
+
+	.placements-modal-content {
+		padding: 1.5rem 2rem 2rem;
+	}
+
+	.placements-modal-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+		gap: 1.5rem;
+	}
+
+	.placements-modal-team h4 {
+		margin: 0 0 0.75rem 0;
+		color: #667eea;
+		text-align: center;
+	}
+
+	.placements-modal-team table {
+		width: 100%;
+		border-collapse: collapse;
+		border-radius: 12px;
+		overflow: hidden;
+		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+	}
+
+	.placements-modal-team thead {
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: white;
+	}
+
+	.placements-modal-team th,
+	.placements-modal-team td {
+		padding: 0.75rem;
+		text-align: center;
+		font-size: 0.95rem;
+	}
+
+	.placements-modal-team tbody tr {
+		background: white;
+	}
+
+	.placements-modal-team tbody tr:nth-child(even) {
+		background: #f8f9fb;
 	}
 
 	.options-content {
@@ -2704,6 +2839,22 @@
 
 	.dark-mode .close-btn:hover {
 		background: rgba(255, 255, 255, 0.2);
+	}
+
+	.dark-mode .placement-btn {
+		background: linear-gradient(135deg, #4a5a9a 0%, #5a4a8a 100%);
+	}
+
+	.dark-mode .placements-modal-team thead {
+		background: linear-gradient(135deg, #4a5a9a 0%, #5a4a8a 100%);
+	}
+
+	.dark-mode .placements-modal-team tbody tr {
+		background: #1e1e2e;
+	}
+
+	.dark-mode .placements-modal-team tbody tr:nth-child(even) {
+		background: #25253a;
 	}
 
 	.dark-mode .option-text {
