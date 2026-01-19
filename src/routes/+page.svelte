@@ -344,6 +344,12 @@
 		return activeTrump === 1 ? team1Level : team2Level;
 	}
 
+	function getMinSelectableEndCardLevel(): number {
+		const activeTrump = getActiveTrumpTeam();
+		if (activeTrump === null) return MIN_LEVEL;
+		return activeTrump === 1 ? team1Level : team2Level;
+	}
+
 	function getTrumpTeamName(): string {
 		const activeTrump = getActiveTrumpTeam();
 		if (activeTrump === null) return language === 'en' ? 'None' : '无';
@@ -427,15 +433,16 @@
 
 	function setEndCardLevel(value: number) {
 		const clamped = clampEndCardLevel(value);
-		endCardLevel = clamped;
-		team1Level = clampLevelToEndCard(team1Level, clamped);
-		team2Level = clampLevelToEndCard(team2Level, clamped);
+		const minSelectable = getMinSelectableEndCardLevel();
+		endCardLevel = Math.max(clamped, minSelectable);
+		team1Level = clampLevelToEndCard(team1Level, endCardLevel);
+		team2Level = clampLevelToEndCard(team2Level, endCardLevel);
 		roundHistory = roundHistory.map((round) => ({
 			...round,
-			team1Level: clampLevelToEndCard(round.team1Level, clamped),
-			team2Level: clampLevelToEndCard(round.team2Level, clamped)
+			team1Level: clampLevelToEndCard(round.team1Level, endCardLevel),
+			team2Level: clampLevelToEndCard(round.team2Level, endCardLevel)
 		}));
-		if (clamped !== MAX_LEVEL) {
+		if (endCardLevel !== MAX_LEVEL) {
 			aceChallengeTeam = null;
 			aceChallengeRemaining = 0;
 		}
@@ -546,14 +553,10 @@
 		const comboName = getComboName(combo);
 		const challengeWasActiveAtStart = aceChallengeTeam !== null && endCardLevel === MAX_LEVEL;
 		const winnerLevelBefore = winnerTeam === 1 ? team1Level : team2Level;
-		const projectedWinnerLevelAfter = Math.min(winnerLevelBefore + points, endCardLevel);
 		const qualifiesThisRound = isQualifyingAceWin(combo);
 
-		// If a team is already on Ace, they must win a qualifying combo to win the match.
-		const wonGame =
-			endCardLevel === MAX_LEVEL
-				? winnerLevelBefore === endCardLevel && qualifiesThisRound
-				: projectedWinnerLevelAfter === endCardLevel && qualifiesThisRound;
+		// End card behaves like Ace: only 1-2 or 1-3 can win, and you must already be on it.
+		const wonGame = winnerLevelBefore === endCardLevel && qualifiesThisRound;
 
 		// Add to history (store pre-round state for undo)
 		roundHistory.push({
@@ -1338,7 +1341,7 @@
 							</div>
 
 							<div class="scoring-actions">
-								<button class="start-btn" disabled={!isRoundPlacesScorable()} onclick={scoreRoundFromPlaces}>
+								<button class="start-btn" disabled={!isRoundPlacesScorable() || (trumpTeam === null && initialTrumpTeam === null)} onclick={scoreRoundFromPlaces}>
 									Score Round
 								</button>
 								<button class="cancel-btn" onclick={cancelScoring}>Cancel</button>
@@ -1412,7 +1415,7 @@
 									>
 										{#each levelCards as label, idx}
 											{@const level = idx + MIN_LEVEL}
-											<option value={level}>{label}</option>
+											<option value={level} disabled={level < getMinSelectableEndCardLevel()}>{label}</option>
 										{/each}
 									</select>
 								</label>
@@ -1879,6 +1882,14 @@
 	.start-btn:hover {
 		transform: translateY(-3px);
 		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+	}
+
+	.start-btn:disabled {
+		background: #cbd5e1;
+		color: #64748b;
+		cursor: not-allowed;
+		box-shadow: none;
+		transform: none;
 	}
 
 	/* Game Screen */
